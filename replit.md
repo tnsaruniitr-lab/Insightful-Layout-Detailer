@@ -78,6 +78,30 @@ The `document_chunks` table has a `embedding_vector_pgv vector(1536)` column man
 | GET | `/brands/:id/data/assets` | List data assets |
 | POST | `/brands/:id/data/upload` | Upload data asset |
 
+### Frontend App (Phase 1C - Complete)
+
+The `artifacts/sieve` React+Vite frontend is scaffolded at port 21608 (previewPath `/`). It features 8 pages wired to the API via generated TanStack Query hooks:
+
+| Route | Page | Description |
+|---|---|---|
+| `/` | Dashboard | Brand stats, processed docs count, recent runs, quick actions |
+| `/knowledge` | Knowledge Hub | Upload & manage documents; filter by domain/status; trigger processing |
+| `/brain` | Brain Explorer | Browse principles, rules, playbooks, anti-patterns; tabbed by type + domain |
+| `/brand` | Brand Profile | View/edit brand identity and manage competitors |
+| `/ask` | Ask the Brain | Q&A interface using `askBrain` endpoint |
+| `/map` | Brand Mapping | Map brain intelligence to brand using `mapBrand` |
+| `/strategy` | Strategy Output | Get strategy recommendations using `getBrandStrategy` |
+| `/runs` | Run History | Full audit log of all intelligence executions |
+
+**Key components:**
+- `use-brand-context.tsx` — manages active brand context with localStorage persistence; auto-creates Default Brand on first load (guarded with `useRef` to prevent loops)
+- `components/memo-response.tsx` — renders `MemoResponse` with structured memo display and source citations
+- Vite proxy: `/api` → `http://localhost:8080` for API calls in development
+
+**Seed data:**
+- 2 brands (Sieve Demo Brand + Default Brand)
+- 4 principles, 3 rules, 2 playbooks (with 9 steps), 3 anti-patterns, 2 examples
+
 ### Pipeline Stubs
 
 `artifacts/api-server/src/pipelines/` contains stubs for:
