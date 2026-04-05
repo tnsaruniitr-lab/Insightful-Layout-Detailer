@@ -165,7 +165,7 @@ function buildPlaceholderMemo(
       missingData:
         "Ingestion pipeline required. No embeddings or brain objects available.",
     },
-    sourceRefs: [],
+    source_refs: [],
     status: "done",
     createdAt,
   };

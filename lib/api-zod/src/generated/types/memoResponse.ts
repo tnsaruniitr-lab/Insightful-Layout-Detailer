@@ -24,7 +24,7 @@ export interface MemoResponse {
    */
   missing_data?: string | null;
   sections: MemoSections;
-  sourceRefs: SourceRef[];
+  source_refs: SourceRef[];
   status: string;
   createdAt: Date;
 }

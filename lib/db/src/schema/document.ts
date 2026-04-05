@@ -73,12 +73,14 @@ export const documentChunksTable = pgTable("document_chunks", {
   sourceConfidence: numeric("source_confidence", { precision: 4, scale: 3 }),
   metadataJson: text("metadata_json"),
   //
-  // VECTOR COLUMN — managed outside Drizzle via raw SQL (drizzle-kit 0.45 does not support pgvector natively):
-  //   ALTER TABLE document_chunks ADD COLUMN embedding_vector_pgv vector(1536);
-  //   CREATE INDEX document_chunks_embedding_hnsw ON document_chunks USING hnsw (embedding_vector_pgv vector_cosine_ops);
+  // VECTOR COLUMN — managed outside Drizzle via raw SQL (drizzle-kit 0.45 does not support pgvector natively).
+  // See: lib/db/migrations/0001_pgvector_hnsw.sql
+  //   column: embedding_vector vector(1536)
+  //   index:  document_chunks_embedding_hnsw USING hnsw (embedding_vector vector_cosine_ops)
   //
-  // Use pool.query() or sql`` for all vector similarity operations.
-  // Similarity search: SELECT * FROM document_chunks ORDER BY embedding_vector_pgv <=> $1::vector LIMIT $2
+  // Use pool.query() for all vector operations:
+  //   INSERT: UPDATE document_chunks SET embedding_vector = $1::vector WHERE id = $2
+  //   SEARCH: SELECT * FROM document_chunks ORDER BY embedding_vector <=> $1::vector LIMIT $2
   //
 });
 

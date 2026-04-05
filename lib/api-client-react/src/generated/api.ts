@@ -49,7 +49,6 @@ import type {
   UpdateBrandBody,
   UploadDataAssetBody,
   UploadDocumentBody,
-  UploadDocumentResponse,
   WhereToStartBody,
 } from "./api.schemas";
 
@@ -750,7 +749,7 @@ export function useListDocuments<
 }
 
 /**
- * @summary Upload a document (get presigned upload URL)
+ * @summary Upload a document file (multipart/form-data)
  */
 export const getUploadDocumentUrl = () => {
   return `/api/documents/upload`;
@@ -759,12 +758,33 @@ export const getUploadDocumentUrl = () => {
 export const uploadDocument = async (
   uploadDocumentBody: UploadDocumentBody,
   options?: RequestInit,
-): Promise<UploadDocumentResponse> => {
-  return customFetch<UploadDocumentResponse>(getUploadDocumentUrl(), {
+): Promise<Document> => {
+  const formData = new FormData();
+  formData.append(`file`, uploadDocumentBody.file);
+  formData.append(`title`, uploadDocumentBody.title);
+  if (uploadDocumentBody.sourceType !== undefined) {
+    formData.append(`sourceType`, uploadDocumentBody.sourceType);
+  }
+  if (uploadDocumentBody.domainTag !== undefined) {
+    formData.append(`domainTag`, uploadDocumentBody.domainTag);
+  }
+  if (uploadDocumentBody.author !== undefined) {
+    formData.append(`author`, uploadDocumentBody.author);
+  }
+  if (uploadDocumentBody.sourceUrl !== undefined) {
+    formData.append(`sourceUrl`, uploadDocumentBody.sourceUrl);
+  }
+  if (uploadDocumentBody.trustLevel !== undefined) {
+    formData.append(`trustLevel`, uploadDocumentBody.trustLevel);
+  }
+  if (uploadDocumentBody.brandId !== undefined) {
+    formData.append(`brandId`, uploadDocumentBody.brandId.toString());
+  }
+
+  return customFetch<Document>(getUploadDocumentUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(uploadDocumentBody),
+    body: formData,
   });
 };
 
@@ -813,7 +833,7 @@ export type UploadDocumentMutationBody = BodyType<UploadDocumentBody>;
 export type UploadDocumentMutationError = ErrorType<ErrorResponse>;
 
 /**
- * @summary Upload a document (get presigned upload URL)
+ * @summary Upload a document file (multipart/form-data)
  */
 export const useUploadDocument = <
   TError = ErrorType<ErrorResponse>,

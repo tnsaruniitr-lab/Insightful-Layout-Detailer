@@ -1,9 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, type SQL } from "drizzle-orm";
+import multer from "multer";
 import { db } from "@workspace/db";
 import { documentsTable, documentChunksTable } from "@workspace/db";
 import {
-  UploadDocumentBody,
   ListDocumentsQueryParams,
   GetDocumentParams,
   ProcessDocumentParams,
@@ -14,6 +14,10 @@ import { ObjectStorageService } from "../lib/objectStorage";
 
 const router: IRouter = Router();
 const objectStorage = new ObjectStorageService();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 
 router.get("/documents", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListDocumentsQueryParams.safeParse(req.query);
@@ -24,12 +28,18 @@ router.get("/documents", async (req: Request, res: Response): Promise<void> => {
     }
     if (parsed.data.domain_tag) {
       filters.push(
-        eq(documentsTable.domainTag, parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general")
+        eq(
+          documentsTable.domainTag,
+          parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general"
+        )
       );
     }
     if (parsed.data.status) {
       filters.push(
-        eq(documentsTable.rawTextStatus, parsed.data.status as "pending" | "processing" | "done" | "error")
+        eq(
+          documentsTable.rawTextStatus,
+          parsed.data.status as "pending" | "processing" | "done" | "error"
+        )
       );
     }
   }
@@ -40,49 +50,57 @@ router.get("/documents", async (req: Request, res: Response): Promise<void> => {
   res.json(rows);
 });
 
-router.post("/documents/upload", async (req: Request, res: Response): Promise<void> => {
-  const parsed = UploadDocumentBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
+router.post(
+  "/documents/upload",
+  upload.single("file"),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.file) {
+      res.status(400).json({ error: "No file uploaded. Use multipart/form-data with a 'file' field." });
+      return;
+    }
+    const title = req.body.title as string | undefined;
+    if (!title) {
+      res.status(400).json({ error: "Missing required field: title" });
+      return;
+    }
+
+    const sourceType = (req.body.sourceType as string | undefined) ?? "pdf";
+    const domainTag = (req.body.domainTag as string | undefined) ?? "general";
+    const author = (req.body.author as string | undefined) ?? null;
+    const sourceUrl = (req.body.sourceUrl as string | undefined) ?? null;
+    const trustLevel = (req.body.trustLevel as string | undefined) ?? "medium";
+    const brandId = req.body.brandId ? Number(req.body.brandId) : null;
+
+    const contentType = req.file.mimetype || "application/octet-stream";
+
+    let objectPath: string;
+    try {
+      const result = await objectStorage.uploadBuffer(req.file.buffer, contentType);
+      objectPath = result.objectPath;
+    } catch (err) {
+      req.log.error({ err }, "Failed to upload file to object storage");
+      res.status(500).json({ error: "Failed to store document file" });
+      return;
+    }
+
+    const [doc] = await db
+      .insert(documentsTable)
+      .values({
+        title,
+        sourceType: sourceType as "pdf" | "doc" | "text" | "markdown" | "web_import",
+        domainTag: domainTag as "seo" | "geo" | "aeo" | "content" | "entity" | "general",
+        author,
+        sourceUrl,
+        storagePath: objectPath,
+        rawTextStatus: "pending",
+        trustLevel: trustLevel as "high" | "medium" | "low",
+        brandId,
+      })
+      .returning();
+
+    res.status(201).json(doc);
   }
-  const {
-    title,
-    filename: _filename,
-    contentType: _contentType,
-    fileSize: _fileSize,
-    sourceType = "pdf",
-    domainTag = "general",
-    author,
-    sourceUrl,
-    trustLevel = "medium",
-    brandId,
-  } = parsed.data;
-
-  const uploadUrl = await objectStorage.getObjectEntityUploadURL();
-  const objectPath = objectStorage.normalizeObjectEntityPath(uploadUrl);
-
-  const [doc] = await db
-    .insert(documentsTable)
-    .values({
-      title,
-      sourceType: sourceType as "pdf" | "doc" | "text" | "markdown" | "web_import",
-      domainTag: domainTag as "seo" | "geo" | "aeo" | "content" | "entity" | "general",
-      author: author ?? null,
-      sourceUrl: sourceUrl ?? null,
-      storagePath: objectPath,
-      rawTextStatus: "pending",
-      trustLevel: trustLevel as "high" | "medium" | "low",
-      brandId: brandId ?? null,
-    })
-    .returning();
-
-  res.status(201).json({
-    documentId: doc.id,
-    uploadUrl,
-    objectPath,
-  });
-});
+);
 
 router.get("/documents/:id", async (req: Request, res: Response): Promise<void> => {
   const parsed = GetDocumentParams.safeParse(req.params);

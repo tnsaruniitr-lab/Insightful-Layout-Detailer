@@ -123,57 +123,6 @@ export interface Document {
   createdAt: string;
 }
 
-export type UploadDocumentBodySourceType =
-  (typeof UploadDocumentBodySourceType)[keyof typeof UploadDocumentBodySourceType];
-
-export const UploadDocumentBodySourceType = {
-  pdf: "pdf",
-  doc: "doc",
-  text: "text",
-  markdown: "markdown",
-  web_import: "web_import",
-} as const;
-
-export type UploadDocumentBodyDomainTag =
-  (typeof UploadDocumentBodyDomainTag)[keyof typeof UploadDocumentBodyDomainTag];
-
-export const UploadDocumentBodyDomainTag = {
-  seo: "seo",
-  geo: "geo",
-  aeo: "aeo",
-  content: "content",
-  entity: "entity",
-  general: "general",
-} as const;
-
-export type UploadDocumentBodyTrustLevel =
-  (typeof UploadDocumentBodyTrustLevel)[keyof typeof UploadDocumentBodyTrustLevel];
-
-export const UploadDocumentBodyTrustLevel = {
-  high: "high",
-  medium: "medium",
-  low: "low",
-} as const;
-
-export interface UploadDocumentBody {
-  title: string;
-  filename: string;
-  fileSize: number;
-  contentType: string;
-  sourceType?: UploadDocumentBodySourceType;
-  domainTag?: UploadDocumentBodyDomainTag;
-  author?: string;
-  sourceUrl?: string;
-  trustLevel?: UploadDocumentBodyTrustLevel;
-  brandId?: number;
-}
-
-export interface UploadDocumentResponse {
-  documentId: number;
-  uploadUrl: string;
-  objectPath: string;
-}
-
 export interface ProcessStatusResponse {
   status: string;
   documentId: number;
@@ -404,7 +353,7 @@ export interface MemoResponse {
    */
   missing_data?: string | null;
   sections: MemoSections;
-  sourceRefs: SourceRef[];
+  source_refs: SourceRef[];
   status: string;
   createdAt: string;
 }
@@ -553,6 +502,50 @@ export type ListDocumentsParams = {
   brand_id?: number;
   domain_tag?: string;
   status?: string;
+};
+
+export type UploadDocumentBodySourceType =
+  (typeof UploadDocumentBodySourceType)[keyof typeof UploadDocumentBodySourceType];
+
+export const UploadDocumentBodySourceType = {
+  pdf: "pdf",
+  doc: "doc",
+  text: "text",
+  markdown: "markdown",
+  web_import: "web_import",
+} as const;
+
+export type UploadDocumentBodyDomainTag =
+  (typeof UploadDocumentBodyDomainTag)[keyof typeof UploadDocumentBodyDomainTag];
+
+export const UploadDocumentBodyDomainTag = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
+
+export type UploadDocumentBodyTrustLevel =
+  (typeof UploadDocumentBodyTrustLevel)[keyof typeof UploadDocumentBodyTrustLevel];
+
+export const UploadDocumentBodyTrustLevel = {
+  high: "high",
+  medium: "medium",
+  low: "low",
+} as const;
+
+export type UploadDocumentBody = {
+  /** The document file to upload */
+  file: Blob;
+  title: string;
+  sourceType?: UploadDocumentBodySourceType;
+  domainTag?: UploadDocumentBodyDomainTag;
+  author?: string;
+  sourceUrl?: string;
+  trustLevel?: UploadDocumentBodyTrustLevel;
+  brandId?: number;
 };
 
 export type GetDocumentChunksParams = {

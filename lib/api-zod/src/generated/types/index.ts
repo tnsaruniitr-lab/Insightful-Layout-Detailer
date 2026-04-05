@@ -67,5 +67,4 @@ export * from "./uploadDocumentBody";
 export * from "./uploadDocumentBodyDomainTag";
 export * from "./uploadDocumentBodySourceType";
 export * from "./uploadDocumentBodyTrustLevel";
-export * from "./uploadDocumentResponse";
 export * from "./whereToStartBody";

@@ -38,12 +38,10 @@ router.get(
   "/storage/objects/*path",
   async (req: Request, res: Response): Promise<void> => {
     const internalToken = process.env.INTERNAL_API_TOKEN;
-    if (internalToken) {
-      const authHeader = req.headers.authorization ?? "";
-      if (authHeader !== `Bearer ${internalToken}`) {
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
+    const authHeader = req.headers.authorization ?? "";
+    if (!internalToken || authHeader !== `Bearer ${internalToken}`) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
     }
     try {
       const raw = req.params.path;

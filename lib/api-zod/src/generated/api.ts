@@ -138,13 +138,11 @@ export const ListDocumentsResponseItem = zod.object({
 export const ListDocumentsResponse = zod.array(ListDocumentsResponseItem);
 
 /**
- * @summary Upload a document (get presigned upload URL)
+ * @summary Upload a document file (multipart/form-data)
  */
 export const UploadDocumentBody = zod.object({
+  file: zod.instanceof(File).describe("The document file to upload"),
   title: zod.string(),
-  filename: zod.string(),
-  fileSize: zod.number(),
-  contentType: zod.string(),
   sourceType: zod
     .enum(["pdf", "doc", "text", "markdown", "web_import"])
     .optional(),
@@ -381,7 +379,7 @@ export const AskBrainResponse = zod.object({
     uncertainty: zod.string(),
     missingData: zod.string(),
   }),
-  sourceRefs: zod.array(
+  source_refs: zod.array(
     zod.object({
       sourceType: zod.enum([
         "document_chunk",
@@ -425,7 +423,7 @@ export const MapBrandResponse = zod.object({
     uncertainty: zod.string(),
     missingData: zod.string(),
   }),
-  sourceRefs: zod.array(
+  source_refs: zod.array(
     zod.object({
       sourceType: zod.enum([
         "document_chunk",
@@ -468,7 +466,7 @@ export const GetBrandStrategyResponse = zod.object({
     uncertainty: zod.string(),
     missingData: zod.string(),
   }),
-  sourceRefs: zod.array(
+  source_refs: zod.array(
     zod.object({
       sourceType: zod.enum([
         "document_chunk",

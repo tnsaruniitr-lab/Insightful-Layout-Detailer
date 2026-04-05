@@ -9,15 +9,14 @@ import type { UploadDocumentBodyDomainTag } from "./uploadDocumentBodyDomainTag"
 import type { UploadDocumentBodySourceType } from "./uploadDocumentBodySourceType";
 import type { UploadDocumentBodyTrustLevel } from "./uploadDocumentBodyTrustLevel";
 
-export interface UploadDocumentBody {
+export type UploadDocumentBody = {
+  /** The document file to upload */
+  file: Blob;
   title: string;
-  filename: string;
-  fileSize: number;
-  contentType: string;
   sourceType?: UploadDocumentBodySourceType;
   domainTag?: UploadDocumentBodyDomainTag;
   author?: string;
   sourceUrl?: string;
   trustLevel?: UploadDocumentBodyTrustLevel;
   brandId?: number;
-}
+};

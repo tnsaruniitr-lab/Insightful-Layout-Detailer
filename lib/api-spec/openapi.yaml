@@ -221,20 +221,45 @@ paths:
     post:
       operationId: uploadDocument
       tags: [documents]
-      summary: Upload a document (get presigned upload URL)
+      summary: Upload a document file (multipart/form-data)
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
-              $ref: "#/components/schemas/UploadDocumentBody"
+              type: object
+              required:
+                - file
+                - title
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The document file to upload
+                title:
+                  type: string
+                sourceType:
+                  type: string
+                  enum: [pdf, doc, text, markdown, web_import]
+                domainTag:
+                  type: string
+                  enum: [seo, geo, aeo, content, entity, general]
+                author:
+                  type: string
+                sourceUrl:
+                  type: string
+                trustLevel:
+                  type: string
+                  enum: [high, medium, low]
+                brandId:
+                  type: integer
       responses:
         "201":
-          description: Document record created with presigned upload URL
+          description: Document created and file stored
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UploadDocumentResponse"
+                $ref: "#/components/schemas/Document"
         "400":
           description: Validation error
           content:
@@ -803,52 +828,6 @@ components:
         - trustLevel
         - createdAt
 
-    UploadDocumentBody:
-      type: object
-      properties:
-        title:
-          type: string
-        filename:
-          type: string
-        fileSize:
-          type: integer
-        contentType:
-          type: string
-        sourceType:
-          type: string
-          enum: [pdf, doc, text, markdown, web_import]
-        domainTag:
-          type: string
-          enum: [seo, geo, aeo, content, entity, general]
-        author:
-          type: string
-        sourceUrl:
-          type: string
-        trustLevel:
-          type: string
-          enum: [high, medium, low]
-        brandId:
-          type: integer
-      required:
-        - title
-        - filename
-        - fileSize
-        - contentType
-
-    UploadDocumentResponse:
-      type: object
-      properties:
-        documentId:
-          type: integer
-        uploadUrl:
-          type: string
-        objectPath:
-          type: string
-      required:
-        - documentId
-        - uploadUrl
-        - objectPath
-
     ProcessStatusResponse:
       type: object
       properties:
@@ -1183,7 +1162,7 @@ components:
           type: ["string", "null"]
         sections:
           $ref: "#/components/schemas/MemoSections"
-        sourceRefs:
+        source_refs:
           type: array
           items:
             $ref: "#/components/schemas/SourceRef"
@@ -1196,7 +1175,7 @@ components:
         - id
         - runType
         - sections
-        - sourceRefs
+        - source_refs
         - status
         - createdAt
 
