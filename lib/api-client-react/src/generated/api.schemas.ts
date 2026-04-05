@@ -169,7 +169,6 @@ export interface UploadDocumentForm {
 
 export interface ProcessStatusResponse {
   status: string;
-  documentId: number;
 }
 
 export interface DocumentChunk {

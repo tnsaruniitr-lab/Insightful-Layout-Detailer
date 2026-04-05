@@ -1,10 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, type SQL } from "drizzle-orm";
 import multer from "multer";
+import { z } from "zod";
 import { db } from "@workspace/db";
 import { documentsTable, documentChunksTable } from "@workspace/db";
 import {
-  UploadDocumentBody,
   ListDocumentsQueryParams,
   GetDocumentParams,
   ProcessDocumentParams,
@@ -15,6 +15,8 @@ import { ObjectStorageService } from "../lib/objectStorage";
 
 type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
 type DocStatus = "pending" | "processing" | "done" | "error";
+type SourceType = "pdf" | "doc" | "text" | "markdown" | "web_import";
+type TrustLevel = "high" | "medium" | "low";
 
 const router: IRouter = Router();
 const objectStorage = new ObjectStorageService();
@@ -23,7 +25,15 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
-const UploadDocumentBodyText = UploadDocumentBody.omit({ file: true });
+const UploadDocumentBodyText = z.object({
+  title: z.string().min(1),
+  sourceType: z.enum(["pdf", "doc", "text", "markdown", "web_import"]).optional(),
+  domainTag: z.enum(["seo", "geo", "aeo", "content", "entity", "general"]).optional(),
+  author: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  trustLevel: z.enum(["high", "medium", "low"]).optional(),
+  brandId: z.coerce.number().int().positive().optional().nullable(),
+});
 
 router.get("/documents", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListDocumentsQueryParams.safeParse(req.query);
@@ -65,15 +75,8 @@ router.post(
       return;
     }
 
-    const {
-      title,
-      sourceType = "pdf",
-      domainTag = "general",
-      author = null,
-      sourceUrl = null,
-      trustLevel = "medium",
-      brandId = null,
-    } = textParsed.data;
+    const { title, sourceType, domainTag, author, sourceUrl, trustLevel, brandId } =
+      textParsed.data;
 
     const contentType = req.file.mimetype || "application/octet-stream";
 
@@ -91,14 +94,14 @@ router.post(
       .insert(documentsTable)
       .values({
         title,
-        sourceType: sourceType as "pdf" | "doc" | "text" | "markdown" | "web_import",
-        domainTag: domainTag as DomainTag,
-        author,
-        sourceUrl,
+        sourceType: (sourceType ?? "pdf") as SourceType,
+        domainTag: (domainTag ?? "general") as DomainTag,
+        author: author ?? null,
+        sourceUrl: sourceUrl ?? null,
         storagePath: objectPath,
         rawTextStatus: "pending",
-        trustLevel: trustLevel as "high" | "medium" | "low",
-        brandId,
+        trustLevel: (trustLevel ?? "medium") as TrustLevel,
+        brandId: brandId ?? null,
       })
       .returning();
 
@@ -142,7 +145,7 @@ router.post(
       return;
     }
     if (doc.rawTextStatus === "processing") {
-      res.json({ status: "processing", documentId: doc.id });
+      res.json({ status: "processing" });
       return;
     }
     await db
@@ -150,7 +153,7 @@ router.post(
       .set({ rawTextStatus: "processing" })
       .where(eq(documentsTable.id, doc.id));
 
-    res.json({ status: "processing", documentId: doc.id });
+    res.json({ status: "processing" });
   }
 );
 
@@ -163,8 +166,12 @@ router.get(
       return;
     }
     const queryParsed = GetDocumentChunksQueryParams.safeParse(req.query);
-    const limit = queryParsed.success ? (queryParsed.data.limit ?? 50) : 50;
-    const offset = queryParsed.success ? (queryParsed.data.offset ?? 0) : 0;
+    if (!queryParsed.success) {
+      res.status(400).json({ error: queryParsed.error.flatten() });
+      return;
+    }
+    const limit = queryParsed.data.limit ?? 50;
+    const offset = queryParsed.data.offset ?? 0;
 
     const rows = await db
       .select()

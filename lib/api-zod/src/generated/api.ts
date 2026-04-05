@@ -190,7 +190,6 @@ export const ProcessDocumentParams = zod.object({
 
 export const ProcessDocumentResponse = zod.object({
   status: zod.string(),
-  documentId: zod.number(),
 });
 
 /**

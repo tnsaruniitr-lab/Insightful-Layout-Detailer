@@ -11,23 +11,27 @@ const router: IRouter = Router();
 
 router.get("/runs", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListRunsQueryParams.safeParse(req.query);
-  const filters: SQL[] = [];
-  if (parsed.success) {
-    if (parsed.data.run_type) {
-      filters.push(
-        eq(mappingRunsTable.runType, parsed.data.run_type as "knowledge_answer" | "brand_mapping" | "strategy_start")
-      );
-    }
-    if (parsed.data.brand_id != null) {
-      filters.push(eq(mappingRunsTable.brandId, parsed.data.brand_id));
-    }
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
   }
-  const limit = parsed.success ? (parsed.data.limit ?? 50) : 50;
+  const filters: SQL[] = [];
+  if (parsed.data.run_type) {
+    filters.push(
+      eq(
+        mappingRunsTable.runType,
+        parsed.data.run_type as "knowledge_answer" | "brand_mapping" | "strategy_start"
+      )
+    );
+  }
+  if (parsed.data.brand_id != null) {
+    filters.push(eq(mappingRunsTable.brandId, parsed.data.brand_id));
+  }
   const rows = await db
     .select()
     .from(mappingRunsTable)
     .where(filters.length ? and(...filters) : undefined)
-    .limit(limit);
+    .limit(parsed.data.limit ?? 50);
   res.json(rows);
 });
 

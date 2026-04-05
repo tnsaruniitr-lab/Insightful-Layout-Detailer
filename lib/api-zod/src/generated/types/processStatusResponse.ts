@@ -8,5 +8,4 @@
 
 export interface ProcessStatusResponse {
   status: string;
-  documentId: number;
 }
