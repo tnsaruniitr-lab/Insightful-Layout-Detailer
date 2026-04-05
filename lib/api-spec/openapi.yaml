@@ -3,13 +3,26 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Sieve marketing intelligence API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: brands
+    description: Brand and competitor management
+  - name: documents
+    description: Document ingestion and knowledge library
+  - name: brain
+    description: Brain object retrieval (principles, rules, playbooks, anti-patterns, examples)
+  - name: qa
+    description: Question answering and brand mapping
+  - name: runs
+    description: Run history
+  - name: data
+    description: Structured data assets (future)
+
 paths:
   /healthz:
     get:
@@ -24,6 +37,617 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── Brand endpoints ──────────────────────────────────────────────────────
+  /brands:
+    post:
+      operationId: createBrand
+      tags: [brands]
+      summary: Create a brand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBrandBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Brand"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /brands/{id}:
+    get:
+      operationId: getBrand
+      tags: [brands]
+      summary: Get a brand by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Brand
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Brand"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateBrand
+      tags: [brands]
+      summary: Update a brand
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBrandBody"
+      responses:
+        "200":
+          description: Updated brand
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Brand"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /brands/{id}/competitors:
+    get:
+      operationId: getBrandCompetitors
+      tags: [brands]
+      summary: List competitors for a brand
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of competitors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Competitor"
+    post:
+      operationId: createCompetitor
+      tags: [brands]
+      summary: Add a competitor to a brand
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCompetitorBody"
+      responses:
+        "201":
+          description: Created competitor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Competitor"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /brands/{id}/competitors/{competitorId}:
+    delete:
+      operationId: deleteCompetitor
+      tags: [brands]
+      summary: Remove a competitor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: competitorId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── Document endpoints ───────────────────────────────────────────────────
+  /documents:
+    get:
+      operationId: listDocuments
+      tags: [documents]
+      summary: List all documents
+      parameters:
+        - name: brand_id
+          in: query
+          schema:
+            type: integer
+        - name: domain_tag
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Document"
+
+  /documents/upload:
+    post:
+      operationId: uploadDocument
+      tags: [documents]
+      summary: Upload a document (get presigned upload URL)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadDocumentBody"
+      responses:
+        "201":
+          description: Document record created with presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadDocumentResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /documents/{id}:
+    get:
+      operationId: getDocument
+      tags: [documents]
+      summary: Get a document by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /documents/{id}/process:
+    post:
+      operationId: processDocument
+      tags: [documents]
+      summary: Trigger document processing pipeline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Processing started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessStatusResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /documents/{id}/chunks:
+    get:
+      operationId: getDocumentChunks
+      tags: [documents]
+      summary: Get chunks for a processed document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of document chunks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DocumentChunk"
+
+  # ── Brain object endpoints ───────────────────────────────────────────────
+  /principles:
+    get:
+      operationId: listPrinciples
+      tags: [brain]
+      summary: List principles
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [canonical, candidate]
+        - name: domain_tag
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of principles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Principle"
+
+  /rules:
+    get:
+      operationId: listRules
+      tags: [brain]
+      summary: List rules
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: domain_tag
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Rule"
+
+  /playbooks:
+    get:
+      operationId: listPlaybooks
+      tags: [brain]
+      summary: List playbooks
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: domain_tag
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of playbooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Playbook"
+
+  /playbooks/{id}:
+    get:
+      operationId: getPlaybook
+      tags: [brain]
+      summary: Get a playbook with its steps
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Playbook with steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybookWithSteps"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /anti-patterns:
+    get:
+      operationId: listAntiPatterns
+      tags: [brain]
+      summary: List anti-patterns
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: domain_tag
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of anti-patterns
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AntiPattern"
+
+  /examples:
+    get:
+      operationId: listExamples
+      tags: [brain]
+      summary: List examples
+      parameters:
+        - name: domain_tag
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of examples
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Example"
+
+  # ── Q&A and Strategy endpoints ───────────────────────────────────────────
+  /brain/ask:
+    post:
+      operationId: askBrain
+      tags: [qa]
+      summary: Ask a question to the brain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AskBrainBody"
+      responses:
+        "200":
+          description: Memo response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /brain/map-brand:
+    post:
+      operationId: mapBrand
+      tags: [qa]
+      summary: Map brain intelligence to a specific brand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MapBrandBody"
+      responses:
+        "200":
+          description: Brand mapping memo response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /brain/where-to-start:
+    post:
+      operationId: getBrandStrategy
+      tags: [qa]
+      summary: Get strategy starting recommendations for a brand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WhereToStartBody"
+      responses:
+        "200":
+          description: Strategy memo response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Run history endpoints ────────────────────────────────────────────────
+  /runs:
+    get:
+      operationId: listRuns
+      tags: [runs]
+      summary: List all mapping runs
+      parameters:
+        - name: run_type
+          in: query
+          schema:
+            type: string
+            enum: [knowledge_answer, brand_mapping, strategy_start]
+        - name: brand_id
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MappingRun"
+
+  /runs/{id}:
+    get:
+      operationId: getRun
+      tags: [runs]
+      summary: Get a single run with its full output and sources
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Full run with sources
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MappingRunDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Data asset endpoints (stubs) ─────────────────────────────────────────
+  /brands/{id}/data/assets:
+    get:
+      operationId: getBrandDataAssets
+      tags: [data]
+      summary: List uploaded data assets for a brand
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of data assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DataAsset"
+
+  /brands/{id}/data/upload:
+    post:
+      operationId: uploadBrandData
+      tags: [data]
+      summary: Upload a structured data asset for a brand
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadDataAssetBody"
+      responses:
+        "201":
+          description: Data asset record created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataAsset"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +658,699 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    # ── Brand schemas ─────────────────────────────────────────────────────
+    Brand:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        icpDescription:
+          type: ["string", "null"]
+        positioningStatement:
+          type: ["string", "null"]
+        targetGeographiesJson:
+          type: ["string", "null"]
+        productTruthsJson:
+          type: ["string", "null"]
+        toneDescriptorsJson:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - createdAt
+        - updatedAt
+
+    CreateBrandBody:
+      type: object
+      properties:
+        name:
+          type: string
+        icpDescription:
+          type: string
+        positioningStatement:
+          type: string
+        targetGeographiesJson:
+          type: string
+        productTruthsJson:
+          type: string
+        toneDescriptorsJson:
+          type: string
+      required:
+        - name
+
+    UpdateBrandBody:
+      type: object
+      properties:
+        name:
+          type: string
+        icpDescription:
+          type: string
+        positioningStatement:
+          type: string
+        targetGeographiesJson:
+          type: string
+        productTruthsJson:
+          type: string
+        toneDescriptorsJson:
+          type: string
+
+    Competitor:
+      type: object
+      properties:
+        id:
+          type: integer
+        brandId:
+          type: integer
+        name:
+          type: string
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - brandId
+        - name
+        - createdAt
+
+    CreateCompetitorBody:
+      type: object
+      properties:
+        name:
+          type: string
+        notes:
+          type: string
+      required:
+        - name
+
+    # ── Document schemas ──────────────────────────────────────────────────
+    Document:
+      type: object
+      properties:
+        id:
+          type: integer
+        brandId:
+          type: ["integer", "null"]
+        title:
+          type: string
+        sourceType:
+          type: string
+          enum: [pdf, doc, text, markdown, web_import]
+        domainTag:
+          type: string
+          enum: [seo, geo, aeo, content, entity, general]
+        author:
+          type: ["string", "null"]
+        sourceUrl:
+          type: ["string", "null"]
+        storagePath:
+          type: string
+        rawTextStatus:
+          type: string
+          enum: [pending, processing, done, error]
+        errorMessage:
+          type: ["string", "null"]
+        trustLevel:
+          type: string
+          enum: [high, medium, low]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - sourceType
+        - domainTag
+        - storagePath
+        - rawTextStatus
+        - trustLevel
+        - createdAt
+
+    UploadDocumentBody:
+      type: object
+      properties:
+        title:
+          type: string
+        filename:
+          type: string
+        fileSize:
+          type: integer
+        contentType:
+          type: string
+        sourceType:
+          type: string
+          enum: [pdf, doc, text, markdown, web_import]
+        domainTag:
+          type: string
+          enum: [seo, geo, aeo, content, entity, general]
+        author:
+          type: string
+        sourceUrl:
+          type: string
+        trustLevel:
+          type: string
+          enum: [high, medium, low]
+        brandId:
+          type: integer
+      required:
+        - title
+        - filename
+        - fileSize
+        - contentType
+
+    UploadDocumentResponse:
+      type: object
+      properties:
+        documentId:
+          type: integer
+        uploadUrl:
+          type: string
+        objectPath:
+          type: string
+      required:
+        - documentId
+        - uploadUrl
+        - objectPath
+
+    ProcessStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        documentId:
+          type: integer
+      required:
+        - status
+        - documentId
+
+    DocumentChunk:
+      type: object
+      properties:
+        id:
+          type: integer
+        documentId:
+          type: integer
+        chunkIndex:
+          type: integer
+        chunkText:
+          type: string
+        tokenCount:
+          type: integer
+        domainTag:
+          type: ["string", "null"]
+        sourceConfidence:
+          type: ["string", "null"]
+        metadataJson:
+          type: ["string", "null"]
+      required:
+        - id
+        - documentId
+        - chunkIndex
+        - chunkText
+        - tokenCount
+
+    # ── Brain object schemas ──────────────────────────────────────────────
+    Principle:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        statement:
+          type: string
+        explanation:
+          type: ["string", "null"]
+        domainTag:
+          type: string
+        confidenceScore:
+          type: ["string", "null"]
+        sourceCount:
+          type: integer
+        sourceRefsJson:
+          type: string
+        status:
+          type: string
+          enum: [canonical, candidate]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - statement
+        - domainTag
+        - sourceCount
+        - sourceRefsJson
+        - status
+        - createdAt
+        - updatedAt
+
+    Rule:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        ruleType:
+          type: string
+          enum: [diagnostic, mapping, scoring, warning]
+        ifCondition:
+          type: string
+        thenLogic:
+          type: string
+        domainTag:
+          type: string
+        confidenceScore:
+          type: ["string", "null"]
+        sourceRefsJson:
+          type: string
+        status:
+          type: string
+          enum: [canonical, candidate]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - ruleType
+        - ifCondition
+        - thenLogic
+        - domainTag
+        - sourceRefsJson
+        - status
+        - createdAt
+
+    AntiPattern:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        signalsJson:
+          type: string
+        domainTag:
+          type: string
+        riskLevel:
+          type: string
+          enum: [high, medium, low]
+        sourceRefsJson:
+          type: string
+        status:
+          type: string
+          enum: [canonical, candidate]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - description
+        - signalsJson
+        - domainTag
+        - riskLevel
+        - sourceRefsJson
+        - status
+        - createdAt
+
+    Playbook:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        summary:
+          type: string
+        useWhen:
+          type: ["string", "null"]
+        avoidWhen:
+          type: ["string", "null"]
+        expectedOutcomes:
+          type: ["string", "null"]
+        domainTag:
+          type: string
+        confidenceScore:
+          type: ["string", "null"]
+        sourceRefsJson:
+          type: string
+        status:
+          type: string
+          enum: [canonical, candidate]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - summary
+        - domainTag
+        - sourceRefsJson
+        - status
+        - createdAt
+        - updatedAt
+
+    PlaybookStep:
+      type: object
+      properties:
+        id:
+          type: integer
+        playbookId:
+          type: integer
+        stepOrder:
+          type: integer
+        stepTitle:
+          type: string
+        stepDescription:
+          type: ["string", "null"]
+      required:
+        - id
+        - playbookId
+        - stepOrder
+        - stepTitle
+
+    PlaybookWithSteps:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        summary:
+          type: string
+        useWhen:
+          type: ["string", "null"]
+        avoidWhen:
+          type: ["string", "null"]
+        expectedOutcomes:
+          type: ["string", "null"]
+        domainTag:
+          type: string
+        confidenceScore:
+          type: ["string", "null"]
+        sourceRefsJson:
+          type: string
+        status:
+          type: string
+          enum: [canonical, candidate]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaybookStep"
+      required:
+        - id
+        - name
+        - summary
+        - domainTag
+        - sourceRefsJson
+        - status
+        - createdAt
+        - updatedAt
+        - steps
+
+    Example:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        domainTag:
+          type: string
+        sourceRefsJson:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - description
+        - domainTag
+        - sourceRefsJson
+        - createdAt
+
+    # ── Q&A / Memo schemas ────────────────────────────────────────────────
+    SourceRef:
+      type: object
+      properties:
+        sourceType:
+          type: string
+          enum: [document_chunk, principle, rule, playbook, anti_pattern]
+        sourceId:
+          type: integer
+        title:
+          type: string
+        domainTag:
+          type: ["string", "null"]
+        confidence:
+          type: ["number", "null"]
+        excerpt:
+          type: ["string", "null"]
+      required:
+        - sourceType
+        - sourceId
+        - title
+
+    MemoSections:
+      type: object
+      properties:
+        knownPrinciples:
+          type: string
+        brandInference:
+          type: ["string", "null"]
+        uncertainty:
+          type: string
+        missingData:
+          type: string
+      required:
+        - knownPrinciples
+        - uncertainty
+        - missingData
+
+    MemoResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        runType:
+          type: string
+          enum: [knowledge_answer, brand_mapping, strategy_start]
+        query:
+          type: ["string", "null"]
+        rationale_summary:
+          type: ["string", "null"]
+        confidence:
+          type: ["number", "null"]
+        sections:
+          $ref: "#/components/schemas/MemoSections"
+        sourceRefs:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceRef"
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - runType
+        - sections
+        - sourceRefs
+        - status
+        - createdAt
+
+    AskBrainBody:
+      type: object
+      properties:
+        question:
+          type: string
+        brandId:
+          type: integer
+        domainFilter:
+          type: string
+        useBrandContext:
+          type: boolean
+      required:
+        - question
+
+    MapBrandBody:
+      type: object
+      properties:
+        brandId:
+          type: integer
+        question:
+          type: string
+      required:
+        - brandId
+        - question
+
+    WhereToStartBody:
+      type: object
+      properties:
+        brandId:
+          type: integer
+      required:
+        - brandId
+
+    # ── Run schemas ───────────────────────────────────────────────────────
+    MappingRun:
+      type: object
+      properties:
+        id:
+          type: integer
+        brandId:
+          type: ["integer", "null"]
+        query:
+          type: ["string", "null"]
+        runType:
+          type: string
+          enum: [knowledge_answer, brand_mapping, strategy_start]
+        status:
+          type: string
+          enum: [pending, processing, done, error]
+        rationale_summary:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - runType
+        - status
+        - createdAt
+
+    MappingRunSource:
+      type: object
+      properties:
+        id:
+          type: integer
+        mappingRunId:
+          type: integer
+        sourceType:
+          type: string
+          enum: [document_chunk, principle, rule, playbook, anti_pattern]
+        sourceId:
+          type: integer
+      required:
+        - id
+        - mappingRunId
+        - sourceType
+        - sourceId
+
+    MappingRunDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        brandId:
+          type: ["integer", "null"]
+        query:
+          type: ["string", "null"]
+        runType:
+          type: string
+          enum: [knowledge_answer, brand_mapping, strategy_start]
+        status:
+          type: string
+          enum: [pending, processing, done, error]
+        outputJson:
+          type: string
+        rationale_summary:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/MappingRunSource"
+      required:
+        - id
+        - runType
+        - status
+        - outputJson
+        - createdAt
+        - sources
+
+    # ── Data asset schemas ────────────────────────────────────────────────
+    DataAsset:
+      type: object
+      properties:
+        id:
+          type: integer
+        brandId:
+          type: integer
+        assetType:
+          type: string
+          enum: [rankings_csv, traffic_csv, geo_snapshot_csv, competitor_csv]
+        filename:
+          type: string
+        storagePath:
+          type: string
+        rowCount:
+          type: ["integer", "null"]
+        uploadedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - brandId
+        - assetType
+        - filename
+        - storagePath
+        - uploadedAt
+
+    UploadDataAssetBody:
+      type: object
+      properties:
+        assetType:
+          type: string
+          enum: [rankings_csv, traffic_csv, geo_snapshot_csv, competitor_csv]
+        filename:
+          type: string
+        fileSize:
+          type: integer
+        contentType:
+          type: string
+      required:
+        - assetType
+        - filename
+        - fileSize
+        - contentType
