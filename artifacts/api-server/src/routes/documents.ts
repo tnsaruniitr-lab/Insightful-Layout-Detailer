@@ -146,19 +146,6 @@ router.post(
       .set({ rawTextStatus: "processing" })
       .where(eq(documentsTable.id, doc.id));
 
-    setImmediate(async () => {
-      try {
-        const { runIngestionGraph } = await import("../pipelines/ingestion");
-        await runIngestionGraph(doc.id);
-      } catch (err) {
-        req.log.error({ err, documentId: doc.id }, "Ingestion pipeline failed");
-        await db
-          .update(documentsTable)
-          .set({ rawTextStatus: "error", errorMessage: String(err) })
-          .where(eq(documentsTable.id, doc.id));
-      }
-    });
-
     res.json({ status: "processing", documentId: doc.id });
   }
 );
