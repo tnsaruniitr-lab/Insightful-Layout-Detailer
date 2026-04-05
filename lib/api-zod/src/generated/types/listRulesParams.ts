@@ -5,8 +5,10 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListRulesDomainTag } from "./listRulesDomainTag";
+import type { ListRulesStatus } from "./listRulesStatus";
 
 export type ListRulesParams = {
-  status?: string;
-  domain_tag?: string;
+  status?: ListRulesStatus;
+  domain_tag?: ListRulesDomainTag;
 };

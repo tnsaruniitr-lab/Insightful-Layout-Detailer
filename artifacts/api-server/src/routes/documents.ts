@@ -4,6 +4,7 @@ import multer from "multer";
 import { db } from "@workspace/db";
 import { documentsTable, documentChunksTable } from "@workspace/db";
 import {
+  UploadDocumentBody,
   ListDocumentsQueryParams,
   GetDocumentParams,
   ProcessDocumentParams,
@@ -12,6 +13,9 @@ import {
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
 
+type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
+type DocStatus = "pending" | "processing" | "done" | "error";
+
 const router: IRouter = Router();
 const objectStorage = new ObjectStorageService();
 const upload = multer({
@@ -19,29 +23,23 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
+const UploadDocumentBodyText = UploadDocumentBody.omit({ file: true });
+
 router.get("/documents", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListDocumentsQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
   const filters: SQL[] = [];
-  if (parsed.success) {
-    if (parsed.data.brand_id != null) {
-      filters.push(eq(documentsTable.brandId, parsed.data.brand_id));
-    }
-    if (parsed.data.domain_tag) {
-      filters.push(
-        eq(
-          documentsTable.domainTag,
-          parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general"
-        )
-      );
-    }
-    if (parsed.data.status) {
-      filters.push(
-        eq(
-          documentsTable.rawTextStatus,
-          parsed.data.status as "pending" | "processing" | "done" | "error"
-        )
-      );
-    }
+  if (parsed.data.brand_id != null) {
+    filters.push(eq(documentsTable.brandId, parsed.data.brand_id));
+  }
+  if (parsed.data.domain_tag) {
+    filters.push(eq(documentsTable.domainTag, parsed.data.domain_tag as DomainTag));
+  }
+  if (parsed.data.status) {
+    filters.push(eq(documentsTable.rawTextStatus, parsed.data.status as DocStatus));
   }
   const rows = await db
     .select()
@@ -55,21 +53,27 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
     if (!req.file) {
-      res.status(400).json({ error: "No file uploaded. Use multipart/form-data with a 'file' field." });
-      return;
-    }
-    const title = req.body.title as string | undefined;
-    if (!title) {
-      res.status(400).json({ error: "Missing required field: title" });
+      res
+        .status(400)
+        .json({ error: "No file uploaded. Use multipart/form-data with a 'file' field." });
       return;
     }
 
-    const sourceType = (req.body.sourceType as string | undefined) ?? "pdf";
-    const domainTag = (req.body.domainTag as string | undefined) ?? "general";
-    const author = (req.body.author as string | undefined) ?? null;
-    const sourceUrl = (req.body.sourceUrl as string | undefined) ?? null;
-    const trustLevel = (req.body.trustLevel as string | undefined) ?? "medium";
-    const brandId = req.body.brandId ? Number(req.body.brandId) : null;
+    const textParsed = UploadDocumentBodyText.safeParse(req.body);
+    if (!textParsed.success) {
+      res.status(400).json({ error: textParsed.error.flatten() });
+      return;
+    }
+
+    const {
+      title,
+      sourceType = "pdf",
+      domainTag = "general",
+      author = null,
+      sourceUrl = null,
+      trustLevel = "medium",
+      brandId = null,
+    } = textParsed.data;
 
     const contentType = req.file.mimetype || "application/octet-stream";
 
@@ -88,7 +92,7 @@ router.post(
       .values({
         title,
         sourceType: sourceType as "pdf" | "doc" | "text" | "markdown" | "web_import",
-        domainTag: domainTag as "seo" | "geo" | "aeo" | "content" | "entity" | "general",
+        domainTag: domainTag as DomainTag,
         author,
         sourceUrl,
         storagePath: objectPath,

@@ -117,8 +117,10 @@ export const DeleteCompetitorParams = zod.object({
  */
 export const ListDocumentsQueryParams = zod.object({
   brand_id: zod.coerce.number().optional(),
-  domain_tag: zod.coerce.string().optional(),
-  status: zod.coerce.string().optional(),
+  domain_tag: zod
+    .enum(["seo", "geo", "aeo", "content", "entity", "general"])
+    .optional(),
+  status: zod.enum(["pending", "processing", "done", "error"]).optional(),
 });
 
 export const ListDocumentsResponseItem = zod.object({
@@ -141,7 +143,9 @@ export const ListDocumentsResponse = zod.array(ListDocumentsResponseItem);
  * @summary Upload a document file (multipart/form-data)
  */
 export const UploadDocumentBody = zod.object({
-  file: zod.instanceof(File).describe("The document file to upload"),
+  file: zod
+    .instanceof(File)
+    .describe("The document file to upload (PDF, DOC, TXT, MD)"),
   title: zod.string(),
   sourceType: zod
     .enum(["pdf", "doc", "text", "markdown", "web_import"])
@@ -220,7 +224,9 @@ export const GetDocumentChunksResponse = zod.array(
  */
 export const ListPrinciplesQueryParams = zod.object({
   status: zod.enum(["canonical", "candidate"]).optional(),
-  domain_tag: zod.coerce.string().optional(),
+  domain_tag: zod
+    .enum(["seo", "geo", "aeo", "content", "entity", "general"])
+    .optional(),
 });
 
 export const ListPrinciplesResponseItem = zod.object({
@@ -242,8 +248,10 @@ export const ListPrinciplesResponse = zod.array(ListPrinciplesResponseItem);
  * @summary List rules
  */
 export const ListRulesQueryParams = zod.object({
-  status: zod.coerce.string().optional(),
-  domain_tag: zod.coerce.string().optional(),
+  status: zod.enum(["canonical", "candidate"]).optional(),
+  domain_tag: zod
+    .enum(["seo", "geo", "aeo", "content", "entity", "general"])
+    .optional(),
 });
 
 export const ListRulesResponseItem = zod.object({
@@ -264,8 +272,10 @@ export const ListRulesResponse = zod.array(ListRulesResponseItem);
  * @summary List playbooks
  */
 export const ListPlaybooksQueryParams = zod.object({
-  status: zod.coerce.string().optional(),
-  domain_tag: zod.coerce.string().optional(),
+  status: zod.enum(["canonical", "candidate"]).optional(),
+  domain_tag: zod
+    .enum(["seo", "geo", "aeo", "content", "entity", "general"])
+    .optional(),
 });
 
 export const ListPlaybooksResponseItem = zod.object({
@@ -319,8 +329,10 @@ export const GetPlaybookResponse = zod.object({
  * @summary List anti-patterns
  */
 export const ListAntiPatternsQueryParams = zod.object({
-  status: zod.coerce.string().optional(),
-  domain_tag: zod.coerce.string().optional(),
+  status: zod.enum(["canonical", "candidate"]).optional(),
+  domain_tag: zod
+    .enum(["seo", "geo", "aeo", "content", "entity", "general"])
+    .optional(),
 });
 
 export const ListAntiPatternsResponseItem = zod.object({
@@ -340,7 +352,9 @@ export const ListAntiPatternsResponse = zod.array(ListAntiPatternsResponseItem);
  * @summary List examples
  */
 export const ListExamplesQueryParams = zod.object({
-  domain_tag: zod.coerce.string().optional(),
+  domain_tag: zod
+    .enum(["seo", "geo", "aeo", "content", "entity", "general"])
+    .optional(),
 });
 
 export const ListExamplesResponseItem = zod.object({

@@ -5,8 +5,10 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListPlaybooksDomainTag } from "./listPlaybooksDomainTag";
+import type { ListPlaybooksStatus } from "./listPlaybooksStatus";
 
 export type ListPlaybooksParams = {
-  status?: string;
-  domain_tag?: string;
+  status?: ListPlaybooksStatus;
+  domain_tag?: ListPlaybooksDomainTag;
 };

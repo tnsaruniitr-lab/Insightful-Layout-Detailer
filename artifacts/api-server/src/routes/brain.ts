@@ -22,20 +22,23 @@ import {
   GetBrandStrategyBody,
 } from "@workspace/api-zod";
 
-const router: IRouter = Router();
+type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
+type BrainStatus = "canonical" | "candidate";
+
+const router = Router();
 
 router.get("/principles", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListPrinciplesQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
   const filters: SQL[] = [];
-  if (parsed.success) {
-    if (parsed.data.status) {
-      filters.push(eq(principlesTable.status, parsed.data.status as "canonical" | "candidate"));
-    }
-    if (parsed.data.domain_tag) {
-      filters.push(
-        eq(principlesTable.domainTag, parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general")
-      );
-    }
+  if (parsed.data.status) {
+    filters.push(eq(principlesTable.status, parsed.data.status as BrainStatus));
+  }
+  if (parsed.data.domain_tag) {
+    filters.push(eq(principlesTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
   const rows = await db
     .select()
@@ -46,16 +49,16 @@ router.get("/principles", async (req: Request, res: Response): Promise<void> => 
 
 router.get("/rules", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListRulesQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
   const filters: SQL[] = [];
-  if (parsed.success) {
-    if (parsed.data.status) {
-      filters.push(eq(rulesTable.status, parsed.data.status as "canonical" | "candidate"));
-    }
-    if (parsed.data.domain_tag) {
-      filters.push(
-        eq(rulesTable.domainTag, parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general")
-      );
-    }
+  if (parsed.data.status) {
+    filters.push(eq(rulesTable.status, parsed.data.status as BrainStatus));
+  }
+  if (parsed.data.domain_tag) {
+    filters.push(eq(rulesTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
   const rows = await db
     .select()
@@ -66,16 +69,16 @@ router.get("/rules", async (req: Request, res: Response): Promise<void> => {
 
 router.get("/playbooks", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListPlaybooksQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
   const filters: SQL[] = [];
-  if (parsed.success) {
-    if (parsed.data.status) {
-      filters.push(eq(playbooksTable.status, parsed.data.status as "canonical" | "candidate"));
-    }
-    if (parsed.data.domain_tag) {
-      filters.push(
-        eq(playbooksTable.domainTag, parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general")
-      );
-    }
+  if (parsed.data.status) {
+    filters.push(eq(playbooksTable.status, parsed.data.status as BrainStatus));
+  }
+  if (parsed.data.domain_tag) {
+    filters.push(eq(playbooksTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
   const rows = await db
     .select()
@@ -108,16 +111,16 @@ router.get("/playbooks/:id", async (req: Request, res: Response): Promise<void> 
 
 router.get("/anti-patterns", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListAntiPatternsQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
   const filters: SQL[] = [];
-  if (parsed.success) {
-    if (parsed.data.status) {
-      filters.push(eq(antiPatternsTable.status, parsed.data.status as "canonical" | "candidate"));
-    }
-    if (parsed.data.domain_tag) {
-      filters.push(
-        eq(antiPatternsTable.domainTag, parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general")
-      );
-    }
+  if (parsed.data.status) {
+    filters.push(eq(antiPatternsTable.status, parsed.data.status as BrainStatus));
+  }
+  if (parsed.data.domain_tag) {
+    filters.push(eq(antiPatternsTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
   const rows = await db
     .select()
@@ -128,11 +131,13 @@ router.get("/anti-patterns", async (req: Request, res: Response): Promise<void> 
 
 router.get("/examples", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListExamplesQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
   const filters: SQL[] = [];
-  if (parsed.success && parsed.data.domain_tag) {
-    filters.push(
-      eq(examplesTable.domainTag, parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general")
-    );
+  if (parsed.data.domain_tag) {
+    filters.push(eq(examplesTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
   const rows = await db
     .select()
@@ -160,10 +165,8 @@ function buildPlaceholderMemo(
       knownPrinciples:
         "No principles have been extracted yet. Upload and process knowledge documents to populate the brain.",
       brandInference: null,
-      uncertainty:
-        "High uncertainty — AI extraction pipeline is pending implementation.",
-      missingData:
-        "Ingestion pipeline required. No embeddings or brain objects available.",
+      uncertainty: "High uncertainty — AI extraction pipeline is pending implementation.",
+      missingData: "Ingestion pipeline required. No embeddings or brain objects available.",
     },
     source_refs: [],
     status: "done",
@@ -174,7 +177,7 @@ function buildPlaceholderMemo(
 router.post("/brain/ask", async (req: Request, res: Response): Promise<void> => {
   const parsed = AskBrainBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
   const { question, brandId } = parsed.data;
@@ -203,7 +206,7 @@ router.post("/brain/ask", async (req: Request, res: Response): Promise<void> => 
 router.post("/brain/map-brand", async (req: Request, res: Response): Promise<void> => {
   const parsed = MapBrandBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
   const { brandId, question } = parsed.data;
@@ -232,7 +235,7 @@ router.post("/brain/map-brand", async (req: Request, res: Response): Promise<voi
 router.post("/brain/where-to-start", async (req: Request, res: Response): Promise<void> => {
   const parsed = GetBrandStrategyBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
   const { brandId } = parsed.data;

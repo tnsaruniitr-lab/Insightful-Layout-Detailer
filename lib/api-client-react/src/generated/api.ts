@@ -48,7 +48,7 @@ import type {
   Rule,
   UpdateBrandBody,
   UploadDataAssetBody,
-  UploadDocumentBody,
+  UploadDocumentForm,
   WhereToStartBody,
 } from "./api.schemas";
 
@@ -756,29 +756,29 @@ export const getUploadDocumentUrl = () => {
 };
 
 export const uploadDocument = async (
-  uploadDocumentBody: UploadDocumentBody,
+  uploadDocumentForm: UploadDocumentForm,
   options?: RequestInit,
 ): Promise<Document> => {
   const formData = new FormData();
-  formData.append(`file`, uploadDocumentBody.file);
-  formData.append(`title`, uploadDocumentBody.title);
-  if (uploadDocumentBody.sourceType !== undefined) {
-    formData.append(`sourceType`, uploadDocumentBody.sourceType);
+  formData.append(`file`, uploadDocumentForm.file);
+  formData.append(`title`, uploadDocumentForm.title);
+  if (uploadDocumentForm.sourceType !== undefined) {
+    formData.append(`sourceType`, uploadDocumentForm.sourceType);
   }
-  if (uploadDocumentBody.domainTag !== undefined) {
-    formData.append(`domainTag`, uploadDocumentBody.domainTag);
+  if (uploadDocumentForm.domainTag !== undefined) {
+    formData.append(`domainTag`, uploadDocumentForm.domainTag);
   }
-  if (uploadDocumentBody.author !== undefined) {
-    formData.append(`author`, uploadDocumentBody.author);
+  if (uploadDocumentForm.author !== undefined) {
+    formData.append(`author`, uploadDocumentForm.author);
   }
-  if (uploadDocumentBody.sourceUrl !== undefined) {
-    formData.append(`sourceUrl`, uploadDocumentBody.sourceUrl);
+  if (uploadDocumentForm.sourceUrl !== undefined) {
+    formData.append(`sourceUrl`, uploadDocumentForm.sourceUrl);
   }
-  if (uploadDocumentBody.trustLevel !== undefined) {
-    formData.append(`trustLevel`, uploadDocumentBody.trustLevel);
+  if (uploadDocumentForm.trustLevel !== undefined) {
+    formData.append(`trustLevel`, uploadDocumentForm.trustLevel);
   }
-  if (uploadDocumentBody.brandId !== undefined) {
-    formData.append(`brandId`, uploadDocumentBody.brandId.toString());
+  if (uploadDocumentForm.brandId !== undefined) {
+    formData.append(`brandId`, uploadDocumentForm.brandId.toString());
   }
 
   return customFetch<Document>(getUploadDocumentUrl(), {
@@ -795,14 +795,14 @@ export const getUploadDocumentMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof uploadDocument>>,
     TError,
-    { data: BodyType<UploadDocumentBody> },
+    { data: BodyType<UploadDocumentForm> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof uploadDocument>>,
   TError,
-  { data: BodyType<UploadDocumentBody> },
+  { data: BodyType<UploadDocumentForm> },
   TContext
 > => {
   const mutationKey = ["uploadDocument"];
@@ -816,7 +816,7 @@ export const getUploadDocumentMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof uploadDocument>>,
-    { data: BodyType<UploadDocumentBody> }
+    { data: BodyType<UploadDocumentForm> }
   > = (props) => {
     const { data } = props ?? {};
 
@@ -829,7 +829,7 @@ export const getUploadDocumentMutationOptions = <
 export type UploadDocumentMutationResult = NonNullable<
   Awaited<ReturnType<typeof uploadDocument>>
 >;
-export type UploadDocumentMutationBody = BodyType<UploadDocumentBody>;
+export type UploadDocumentMutationBody = BodyType<UploadDocumentForm>;
 export type UploadDocumentMutationError = ErrorType<ErrorResponse>;
 
 /**
@@ -842,14 +842,14 @@ export const useUploadDocument = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof uploadDocument>>,
     TError,
-    { data: BodyType<UploadDocumentBody> },
+    { data: BodyType<UploadDocumentForm> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof uploadDocument>>,
   TError,
-  { data: BodyType<UploadDocumentBody> },
+  { data: BodyType<UploadDocumentForm> },
   TContext
 > => {
   return useMutation(getUploadDocumentMutationOptions(options));

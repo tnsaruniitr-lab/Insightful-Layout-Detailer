@@ -123,6 +123,50 @@ export interface Document {
   createdAt: string;
 }
 
+export type UploadDocumentFormSourceType =
+  (typeof UploadDocumentFormSourceType)[keyof typeof UploadDocumentFormSourceType];
+
+export const UploadDocumentFormSourceType = {
+  pdf: "pdf",
+  doc: "doc",
+  text: "text",
+  markdown: "markdown",
+  web_import: "web_import",
+} as const;
+
+export type UploadDocumentFormDomainTag =
+  (typeof UploadDocumentFormDomainTag)[keyof typeof UploadDocumentFormDomainTag];
+
+export const UploadDocumentFormDomainTag = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
+
+export type UploadDocumentFormTrustLevel =
+  (typeof UploadDocumentFormTrustLevel)[keyof typeof UploadDocumentFormTrustLevel];
+
+export const UploadDocumentFormTrustLevel = {
+  high: "high",
+  medium: "medium",
+  low: "low",
+} as const;
+
+export interface UploadDocumentForm {
+  /** The document file to upload (PDF, DOC, TXT, MD) */
+  file: Blob;
+  title: string;
+  sourceType?: UploadDocumentFormSourceType;
+  domainTag?: UploadDocumentFormDomainTag;
+  author?: string;
+  sourceUrl?: string;
+  trustLevel?: UploadDocumentFormTrustLevel;
+  brandId?: number;
+}
+
 export interface ProcessStatusResponse {
   status: string;
   documentId: number;
@@ -500,25 +544,14 @@ export interface UploadDataAssetBody {
 
 export type ListDocumentsParams = {
   brand_id?: number;
-  domain_tag?: string;
-  status?: string;
+  domain_tag?: ListDocumentsDomainTag;
+  status?: ListDocumentsStatus;
 };
 
-export type UploadDocumentBodySourceType =
-  (typeof UploadDocumentBodySourceType)[keyof typeof UploadDocumentBodySourceType];
+export type ListDocumentsDomainTag =
+  (typeof ListDocumentsDomainTag)[keyof typeof ListDocumentsDomainTag];
 
-export const UploadDocumentBodySourceType = {
-  pdf: "pdf",
-  doc: "doc",
-  text: "text",
-  markdown: "markdown",
-  web_import: "web_import",
-} as const;
-
-export type UploadDocumentBodyDomainTag =
-  (typeof UploadDocumentBodyDomainTag)[keyof typeof UploadDocumentBodyDomainTag];
-
-export const UploadDocumentBodyDomainTag = {
+export const ListDocumentsDomainTag = {
   seo: "seo",
   geo: "geo",
   aeo: "aeo",
@@ -527,26 +560,15 @@ export const UploadDocumentBodyDomainTag = {
   general: "general",
 } as const;
 
-export type UploadDocumentBodyTrustLevel =
-  (typeof UploadDocumentBodyTrustLevel)[keyof typeof UploadDocumentBodyTrustLevel];
+export type ListDocumentsStatus =
+  (typeof ListDocumentsStatus)[keyof typeof ListDocumentsStatus];
 
-export const UploadDocumentBodyTrustLevel = {
-  high: "high",
-  medium: "medium",
-  low: "low",
+export const ListDocumentsStatus = {
+  pending: "pending",
+  processing: "processing",
+  done: "done",
+  error: "error",
 } as const;
-
-export type UploadDocumentBody = {
-  /** The document file to upload */
-  file: Blob;
-  title: string;
-  sourceType?: UploadDocumentBodySourceType;
-  domainTag?: UploadDocumentBodyDomainTag;
-  author?: string;
-  sourceUrl?: string;
-  trustLevel?: UploadDocumentBodyTrustLevel;
-  brandId?: number;
-};
 
 export type GetDocumentChunksParams = {
   limit?: number;
@@ -555,7 +577,7 @@ export type GetDocumentChunksParams = {
 
 export type ListPrinciplesParams = {
   status?: ListPrinciplesStatus;
-  domain_tag?: string;
+  domain_tag?: ListPrinciplesDomainTag;
 };
 
 export type ListPrinciplesStatus =
@@ -566,24 +588,108 @@ export const ListPrinciplesStatus = {
   candidate: "candidate",
 } as const;
 
+export type ListPrinciplesDomainTag =
+  (typeof ListPrinciplesDomainTag)[keyof typeof ListPrinciplesDomainTag];
+
+export const ListPrinciplesDomainTag = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
+
 export type ListRulesParams = {
-  status?: string;
-  domain_tag?: string;
+  status?: ListRulesStatus;
+  domain_tag?: ListRulesDomainTag;
 };
+
+export type ListRulesStatus =
+  (typeof ListRulesStatus)[keyof typeof ListRulesStatus];
+
+export const ListRulesStatus = {
+  canonical: "canonical",
+  candidate: "candidate",
+} as const;
+
+export type ListRulesDomainTag =
+  (typeof ListRulesDomainTag)[keyof typeof ListRulesDomainTag];
+
+export const ListRulesDomainTag = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
 
 export type ListPlaybooksParams = {
-  status?: string;
-  domain_tag?: string;
+  status?: ListPlaybooksStatus;
+  domain_tag?: ListPlaybooksDomainTag;
 };
+
+export type ListPlaybooksStatus =
+  (typeof ListPlaybooksStatus)[keyof typeof ListPlaybooksStatus];
+
+export const ListPlaybooksStatus = {
+  canonical: "canonical",
+  candidate: "candidate",
+} as const;
+
+export type ListPlaybooksDomainTag =
+  (typeof ListPlaybooksDomainTag)[keyof typeof ListPlaybooksDomainTag];
+
+export const ListPlaybooksDomainTag = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
 
 export type ListAntiPatternsParams = {
-  status?: string;
-  domain_tag?: string;
+  status?: ListAntiPatternsStatus;
+  domain_tag?: ListAntiPatternsDomainTag;
 };
 
+export type ListAntiPatternsStatus =
+  (typeof ListAntiPatternsStatus)[keyof typeof ListAntiPatternsStatus];
+
+export const ListAntiPatternsStatus = {
+  canonical: "canonical",
+  candidate: "candidate",
+} as const;
+
+export type ListAntiPatternsDomainTag =
+  (typeof ListAntiPatternsDomainTag)[keyof typeof ListAntiPatternsDomainTag];
+
+export const ListAntiPatternsDomainTag = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
+
 export type ListExamplesParams = {
-  domain_tag?: string;
+  domain_tag?: ListExamplesDomainTag;
 };
+
+export type ListExamplesDomainTag =
+  (typeof ListExamplesDomainTag)[keyof typeof ListExamplesDomainTag];
+
+export const ListExamplesDomainTag = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
 
 export type ListRunsParams = {
   run_type?: ListRunsRunType;

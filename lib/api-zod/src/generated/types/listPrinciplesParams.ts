@@ -5,9 +5,10 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListPrinciplesDomainTag } from "./listPrinciplesDomainTag";
 import type { ListPrinciplesStatus } from "./listPrinciplesStatus";
 
 export type ListPrinciplesParams = {
   status?: ListPrinciplesStatus;
-  domain_tag?: string;
+  domain_tag?: ListPrinciplesDomainTag;
 };

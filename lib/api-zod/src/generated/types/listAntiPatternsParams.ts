@@ -5,8 +5,10 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListAntiPatternsDomainTag } from "./listAntiPatternsDomainTag";
+import type { ListAntiPatternsStatus } from "./listAntiPatternsStatus";
 
 export type ListAntiPatternsParams = {
-  status?: string;
-  domain_tag?: string;
+  status?: ListAntiPatternsStatus;
+  domain_tag?: ListAntiPatternsDomainTag;
 };

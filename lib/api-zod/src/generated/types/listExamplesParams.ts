@@ -5,7 +5,8 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListExamplesDomainTag } from "./listExamplesDomainTag";
 
 export type ListExamplesParams = {
-  domain_tag?: string;
+  domain_tag?: ListExamplesDomainTag;
 };

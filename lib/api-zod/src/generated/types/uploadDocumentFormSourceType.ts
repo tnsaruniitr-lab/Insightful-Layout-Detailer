@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type UploadDocumentBodySourceType =
-  (typeof UploadDocumentBodySourceType)[keyof typeof UploadDocumentBodySourceType];
+export type UploadDocumentFormSourceType =
+  (typeof UploadDocumentFormSourceType)[keyof typeof UploadDocumentFormSourceType];
 
-export const UploadDocumentBodySourceType = {
+export const UploadDocumentFormSourceType = {
   pdf: "pdf",
   doc: "doc",
   text: "text",

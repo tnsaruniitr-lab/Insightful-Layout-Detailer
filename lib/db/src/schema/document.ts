@@ -6,6 +6,7 @@ import {
   timestamp,
   pgEnum,
   numeric,
+  customType,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -36,6 +37,25 @@ export const domainTagEnum = pgEnum("domain_tag", [
 ]);
 
 export const trustLevelEnum = pgEnum("trust_level", ["high", "medium", "low"]);
+
+const embeddingVectorType = customType<{
+  data: number[];
+  config: { dimensions: number };
+  configRequired: true;
+}>({
+  dataType(config) {
+    return `vector(${config.dimensions})`;
+  },
+  toDriver(value: number[]) {
+    return `[${value.join(",")}]`;
+  },
+  fromDriver(value: unknown) {
+    if (typeof value === "string") {
+      return value.slice(1, -1).split(",").map(Number);
+    }
+    return value as number[];
+  },
+});
 
 export const documentsTable = pgTable("documents", {
   id: serial("id").primaryKey(),
@@ -72,16 +92,9 @@ export const documentChunksTable = pgTable("document_chunks", {
   domainTag: domainTagEnum("domain_tag").default("general"),
   sourceConfidence: numeric("source_confidence", { precision: 4, scale: 3 }),
   metadataJson: text("metadata_json"),
-  //
-  // VECTOR COLUMN — managed outside Drizzle via raw SQL (drizzle-kit 0.45 does not support pgvector natively).
-  // See: lib/db/migrations/0001_pgvector_hnsw.sql
-  //   column: embedding_vector vector(1536)
-  //   index:  document_chunks_embedding_hnsw USING hnsw (embedding_vector vector_cosine_ops)
-  //
-  // Use pool.query() for all vector operations:
-  //   INSERT: UPDATE document_chunks SET embedding_vector = $1::vector WHERE id = $2
-  //   SEARCH: SELECT * FROM document_chunks ORDER BY embedding_vector <=> $1::vector LIMIT $2
-  //
+  embeddingVector: embeddingVectorType("embedding_vector", { dimensions: 1536 }),
+  // HNSW index is created via lib/db/migrations/0001_pgvector_hnsw.sql (not managed by drizzle-kit).
+  // Similarity search: SELECT * FROM document_chunks ORDER BY embedding_vector <=> $1::vector LIMIT $2
 });
 
 export const insertDocumentChunkSchema = createInsertSchema(documentChunksTable).omit({

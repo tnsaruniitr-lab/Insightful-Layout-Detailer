@@ -5,9 +5,11 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListDocumentsDomainTag } from "./listDocumentsDomainTag";
+import type { ListDocumentsStatus } from "./listDocumentsStatus";
 
 export type ListDocumentsParams = {
   brand_id?: number;
-  domain_tag?: string;
-  status?: string;
+  domain_tag?: ListDocumentsDomainTag;
+  status?: ListDocumentsStatus;
 };

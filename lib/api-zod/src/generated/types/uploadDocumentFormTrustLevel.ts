@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type UploadDocumentBodyTrustLevel =
-  (typeof UploadDocumentBodyTrustLevel)[keyof typeof UploadDocumentBodyTrustLevel];
+export type UploadDocumentFormTrustLevel =
+  (typeof UploadDocumentFormTrustLevel)[keyof typeof UploadDocumentFormTrustLevel];
 
-export const UploadDocumentBodyTrustLevel = {
+export const UploadDocumentFormTrustLevel = {
   high: "high",
   medium: "medium",
   low: "low",

@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type UploadDocumentBodyDomainTag =
-  (typeof UploadDocumentBodyDomainTag)[keyof typeof UploadDocumentBodyDomainTag];
+export type ListRulesDomainTag =
+  (typeof ListRulesDomainTag)[keyof typeof ListRulesDomainTag];
 
-export const UploadDocumentBodyDomainTag = {
+export const ListRulesDomainTag = {
   seo: "seo",
   geo: "geo",
   aeo: "aeo",
