@@ -1178,6 +1178,9 @@ components:
           type: ["string", "null"]
         confidence:
           type: ["number", "null"]
+        missing_data:
+          description: Top-level summary of data gaps that limit analysis quality
+          type: ["string", "null"]
         sections:
           $ref: "#/components/schemas/MemoSections"
         sourceRefs:
@@ -1293,6 +1296,8 @@ components:
         outputJson:
           type: string
         rationale_summary:
+          type: ["string", "null"]
+        missing_data:
           type: ["string", "null"]
         createdAt:
           type: string

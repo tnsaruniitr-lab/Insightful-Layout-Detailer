@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, type SQL } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { documentsTable, documentChunksTable } from "@workspace/db";
 import {
@@ -17,16 +17,26 @@ const objectStorage = new ObjectStorageService();
 
 router.get("/documents", async (req: Request, res: Response): Promise<void> => {
   const parsed = ListDocumentsQueryParams.safeParse(req.query);
-  const filters = parsed.success ? parsed.data : {};
-
+  const filters: SQL[] = [];
+  if (parsed.success) {
+    if (parsed.data.brand_id != null) {
+      filters.push(eq(documentsTable.brandId, parsed.data.brand_id));
+    }
+    if (parsed.data.domain_tag) {
+      filters.push(
+        eq(documentsTable.domainTag, parsed.data.domain_tag as "seo" | "geo" | "aeo" | "content" | "entity" | "general")
+      );
+    }
+    if (parsed.data.status) {
+      filters.push(
+        eq(documentsTable.rawTextStatus, parsed.data.status as "pending" | "processing" | "done" | "error")
+      );
+    }
+  }
   const rows = await db
     .select()
     .from(documentsTable)
-    .where(
-      filters.brand_id != null
-        ? eq(documentsTable.brandId, filters.brand_id)
-        : undefined
-    );
+    .where(filters.length ? and(...filters) : undefined);
   res.json(rows);
 });
 
@@ -38,8 +48,9 @@ router.post("/documents/upload", async (req: Request, res: Response): Promise<vo
   }
   const {
     title,
-    filename,
-    contentType,
+    filename: _filename,
+    contentType: _contentType,
+    fileSize: _fileSize,
     sourceType = "pdf",
     domainTag = "general",
     author,
@@ -123,6 +134,10 @@ router.post(
         await runIngestionGraph(doc.id);
       } catch (err) {
         req.log.error({ err, documentId: doc.id }, "Ingestion pipeline failed");
+        await db
+          .update(documentsTable)
+          .set({ rawTextStatus: "error", errorMessage: String(err) })
+          .where(eq(documentsTable.id, doc.id));
       }
     });
 

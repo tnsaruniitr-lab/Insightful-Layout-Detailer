@@ -18,6 +18,11 @@ export interface MemoResponse {
   rationale_summary?: string | null;
   /** @nullable */
   confidence?: number | null;
+  /**
+   * Top-level summary of data gaps that limit analysis quality
+   * @nullable
+   */
+  missing_data?: string | null;
   sections: MemoSections;
   sourceRefs: SourceRef[];
   status: string;

@@ -72,6 +72,14 @@ export const documentChunksTable = pgTable("document_chunks", {
   domainTag: domainTagEnum("domain_tag").default("general"),
   sourceConfidence: numeric("source_confidence", { precision: 4, scale: 3 }),
   metadataJson: text("metadata_json"),
+  //
+  // VECTOR COLUMN — managed outside Drizzle via raw SQL (drizzle-kit 0.45 does not support pgvector natively):
+  //   ALTER TABLE document_chunks ADD COLUMN embedding_vector_pgv vector(1536);
+  //   CREATE INDEX document_chunks_embedding_hnsw ON document_chunks USING hnsw (embedding_vector_pgv vector_cosine_ops);
+  //
+  // Use pool.query() or sql`` for all vector similarity operations.
+  // Similarity search: SELECT * FROM document_chunks ORDER BY embedding_vector_pgv <=> $1::vector LIMIT $2
+  //
 });
 
 export const insertDocumentChunkSchema = createInsertSchema(documentChunksTable).omit({

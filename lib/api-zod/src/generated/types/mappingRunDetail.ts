@@ -20,6 +20,8 @@ export interface MappingRunDetail {
   outputJson: string;
   /** @nullable */
   rationale_summary?: string | null;
+  /** @nullable */
+  missing_data?: string | null;
   createdAt: Date;
   sources: MappingRunSource[];
 }

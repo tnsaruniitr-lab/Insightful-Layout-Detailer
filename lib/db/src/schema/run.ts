@@ -41,6 +41,7 @@ export const mappingRunsTable = pgTable("mapping_runs", {
   status: runStatusEnum("status").notNull().default("done"),
   outputJson: text("output_json").notNull().default("{}"),
   rationale_summary: text("rationale_summary"),
+  missing_data: text("missing_data"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

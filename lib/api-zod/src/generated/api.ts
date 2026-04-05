@@ -371,6 +371,10 @@ export const AskBrainResponse = zod.object({
   query: zod.string().nullish(),
   rationale_summary: zod.string().nullish(),
   confidence: zod.number().nullish(),
+  missing_data: zod
+    .string()
+    .nullish()
+    .describe("Top-level summary of data gaps that limit analysis quality"),
   sections: zod.object({
     knownPrinciples: zod.string(),
     brandInference: zod.string().nullish(),
@@ -411,6 +415,10 @@ export const MapBrandResponse = zod.object({
   query: zod.string().nullish(),
   rationale_summary: zod.string().nullish(),
   confidence: zod.number().nullish(),
+  missing_data: zod
+    .string()
+    .nullish()
+    .describe("Top-level summary of data gaps that limit analysis quality"),
   sections: zod.object({
     knownPrinciples: zod.string(),
     brandInference: zod.string().nullish(),
@@ -450,6 +458,10 @@ export const GetBrandStrategyResponse = zod.object({
   query: zod.string().nullish(),
   rationale_summary: zod.string().nullish(),
   confidence: zod.number().nullish(),
+  missing_data: zod
+    .string()
+    .nullish()
+    .describe("Top-level summary of data gaps that limit analysis quality"),
   sections: zod.object({
     knownPrinciples: zod.string(),
     brandInference: zod.string().nullish(),
@@ -513,6 +525,7 @@ export const GetRunResponse = zod.object({
   status: zod.enum(["pending", "processing", "done", "error"]),
   outputJson: zod.string(),
   rationale_summary: zod.string().nullish(),
+  missing_data: zod.string().nullish(),
   createdAt: zod.coerce.date(),
   sources: zod.array(
     zod.object({
