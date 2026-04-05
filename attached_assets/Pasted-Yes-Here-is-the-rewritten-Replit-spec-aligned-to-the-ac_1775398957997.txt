@@ -1,0 +1,820 @@
+Yes. Here is the rewritten Replit spec aligned to the actual goal:
+
+Sieve — Phase 1 Spec
+Marketing Brain + Brand Mapper
+
+Goal: Build the intelligence layer first, then apply it to a specific brand.
+
+This is not a generic audit tool and not yet a full autonomous marketing system.
+
+Phase 1 should create a marketing brain that:
+
+learns structured SEO / GEO / AEO intelligence from documents and trusted sources
+stores that intelligence as reusable principles, playbooks, rules, and anti-patterns
+maps that intelligence to a specific brand profile
+answers brand-specific questions
+suggests where strategy should start
+
+Later phases can add:
+
+weekly planning outputs
+execution workflows
+skills
+learning loops
+autonomous agents
+1. Product Definition
+What the product is
+
+Sieve is a marketing intelligence operating system.
+
+At its core, it has 3 layers:
+
+Layer 1 — Knowledge Brain
+
+Stores reusable intelligence about:
+
+SEO
+GEO / AI search visibility
+AEO / answer optimization
+content strategy
+entity strategy
+comparison / alternatives strategy
+content moat building
+diagnostic frameworks
+prioritization heuristics
+Layer 2 — Brand Mapper
+
+Stores one brand’s specifics:
+
+positioning
+ICP
+offer
+geographies
+product truths
+tone
+competitors
+optional uploaded data
+
+This layer determines:
+
+which knowledge is relevant
+which playbooks fit
+what likely bottlenecks exist
+where strategy should begin
+Layer 3 — Output Engine
+
+Uses brain + brand context to generate:
+
+answers to questions
+recommended starting points
+relevant playbooks
+strategic priorities
+later: plans, audits, tasks
+2. Phase 1 Scope
+Core outcome
+
+Phase 1 should answer:
+
+what does the brain know about SEO / GEO / AEO?
+which parts of that intelligence matter for this brand?
+where should this brand start?
+which playbooks apply?
+what are the likely strategic priorities?
+Phase 1 includes
+one-brand setup
+document upload
+knowledge ingestion
+chunking / embedding / indexing
+intelligence distillation
+structured brain storage
+brand profile setup
+question answering over the brain
+brand-mapped answers
+relevant playbook recommendations
+“where to start” strategic output
+Phase 1 excludes
+autonomous actions
+scheduled crawlers
+auto-publishing
+connector syncs
+execution agents
+weight tuning from outcomes
+open-ended internet self-learning without review
+multi-user auth
+3. Product Outputs in Phase 1
+
+The product should produce 4 kinds of outputs.
+
+A. Knowledge answers
+
+Examples:
+
+what makes content citation-worthy for AI search?
+what are best practices for alternatives pages?
+what are common GEO failure modes?
+how does entity consistency affect visibility?
+B. Brand-mapped answers
+
+Examples:
+
+for this brand, which GEO playbooks matter most?
+based on this ICP and positioning, where should strategy start?
+which content types are highest leverage for this brand?
+which anti-patterns are most likely hurting this brand?
+C. Recommended playbooks
+
+Examples:
+
+comparison page playbook
+commercial cluster strengthening playbook
+entity consistency playbook
+first-party evidence playbook
+bottom-funnel content playbook
+D. Strategy starting point
+
+Not yet a full audit.
+Instead, output:
+
+likely focus areas
+recommended first strategic themes
+why those themes fit the brand
+what data would be needed next for higher-confidence planning
+4. Architecture Overview
+Recommended stack on Replit
+Frontend
+React + Vite
+TypeScript
+React Router
+generated API client from OpenAPI
+Backend
+TypeScript
+Express or Fastify
+LangGraph.js for workflow orchestration
+OpenAI-compatible LLM access via Replit AI integration
+Drizzle ORM
+PostgreSQL on Replit
+Knowledge retrieval
+vector store for chunk embeddings
+can start with pgvector if available in Postgres, otherwise separate vector layer later
+raw documents stored in file/object layer with metadata in Postgres
+Why this stack
+stays in one TypeScript workspace
+keeps deployment simple
+supports stateful workflows
+can scale into later agent / skills architecture without replatforming
+5. Core System Design
+5.1 Memory zones
+Zone A — Raw source library
+
+Stores uploaded source documents:
+
+PDFs
+docs exports
+text files
+markdown
+notes
+blog collections
+playbooks
+internal strategy docs
+
+Purpose:
+
+archive
+source traceability
+re-processing later
+Zone B — Chunk index
+
+Stores chunked document units with embeddings.
+
+Purpose:
+
+semantic retrieval
+source-backed Q&A
+playbook extraction
+Zone C — Structured brain
+
+Stores distilled intelligence objects.
+
+These are the core reusable units:
+
+principles
+rules
+playbooks
+anti-patterns
+examples
+scoring heuristics
+
+This is the actual “brain”.
+
+Zone D — Brand context
+
+Stores one brand’s details and later optional uploaded performance data.
+
+Zone E — Output history
+
+Stores:
+
+questions asked
+mapped answers
+playbooks recommended
+strategy starting points returned
+
+This becomes the first layer of decision memory.
+
+6. Data Model
+6.1 Core tables for Phase 1
+brands
+id
+name
+icp_description
+positioning_statement
+target_geographies_json
+product_truths_json
+tone_descriptors_json
+created_at
+updated_at
+competitors
+id
+brand_id
+name
+notes
+created_at
+documents
+id
+brand_id nullable
+title
+source_type (pdf, doc, text, markdown, web_import)
+domain_tag (seo, geo, aeo, content, entity, general)
+author
+source_url nullable
+storage_path
+raw_text_status
+trust_level
+created_at
+document_chunks
+id
+document_id
+chunk_index
+chunk_text
+token_count
+embedding_vector
+domain_tag
+source_confidence
+metadata_json
+principles
+id
+title
+statement
+explanation
+domain_tag
+confidence_score
+source_count
+source_refs_json
+created_at
+updated_at
+rules
+id
+name
+rule_type (diagnostic, mapping, scoring, warning)
+if_condition
+then_logic
+domain_tag
+confidence_score
+source_refs_json
+created_at
+anti_patterns
+id
+title
+description
+signals_json
+domain_tag
+risk_level
+source_refs_json
+created_at
+playbooks
+id
+name
+summary
+use_when
+avoid_when
+expected_outcomes
+domain_tag
+confidence_score
+source_refs_json
+created_at
+updated_at
+playbook_steps
+id
+playbook_id
+step_order
+step_title
+step_description
+examples
+id
+title
+description
+domain_tag
+source_refs_json
+created_at
+mapping_runs
+id
+brand_id
+query
+run_type (knowledge_answer, brand_mapping, strategy_start)
+status
+output_json
+rationale_summary
+created_at
+mapping_run_sources
+id
+mapping_run_id
+source_type (document_chunk, principle, rule, playbook, anti_pattern)
+source_id
+uploaded_data_assets
+
+For future compatibility.
+
+id
+brand_id
+asset_type (rankings_csv, traffic_csv, geo_snapshot_csv, competitor_csv)
+filename
+storage_path
+row_count
+uploaded_at
+
+This table exists now so Phase 2 data workflows plug in cleanly.
+
+7. Knowledge Ingestion Pipeline
+Goal
+
+Turn raw documents into structured marketing intelligence.
+
+Pipeline steps
+Step 1 — ingest source
+
+Input:
+
+uploaded PDF/doc/text/markdown
+optional web import later
+
+Output:
+
+document record
+raw stored file
+extracted text
+Step 2 — chunk and embed
+
+Split into chunks with metadata:
+
+source
+title
+topic
+domain
+author
+trust level
+
+Store in document_chunks.
+
+Step 3 — classify
+
+Classify chunks into categories such as:
+
+SEO fundamentals
+GEO / AI visibility
+answer structure
+entity strategy
+comparison content
+bottom-funnel content
+content quality
+anti-patterns
+Step 4 — distill intelligence
+
+Use extraction workflows to convert chunks into structured objects:
+
+principle
+rule
+playbook
+anti-pattern
+example
+Step 5 — deduplicate and merge
+
+If similar principles or playbooks already exist:
+
+merge
+increase source count
+update confidence
+preserve provenance
+Step 6 — mark as canonical or candidate
+
+Phase 1 should allow:
+
+canonical = approved brain knowledge
+candidate = extracted but not yet trusted enough
+
+This is important for future self-learning.
+
+8. Brain Logic
+The brain should not be “just RAG”
+
+It should combine:
+
+semantic retrieval from source chunks
+structured retrieval from principles / rules / playbooks
+brand mapping logic
+output formatting logic
+Retrieval priority
+
+When answering a question:
+
+relevant canonical playbooks
+relevant principles and rules
+relevant anti-patterns
+supporting document chunks
+brand context
+optional uploaded structured data later
+
+This keeps answers grounded in structured intelligence first.
+
+9. Brand Mapping Logic
+Goal
+
+Map general marketing intelligence to one brand.
+
+Inputs
+brand profile
+competitor notes
+optional uploaded data
+user question
+Outputs
+relevant playbooks
+likely applicable principles
+likely anti-patterns
+strategy starting points
+confidence levels
+missing data needed
+Mapping dimensions
+
+Each playbook or principle should be scored against:
+
+ICP fit
+offer fit
+geography relevance
+funnel relevance
+category relevance
+strategic leverage
+likely time to signal
+confidence based on known brand context
+10. LangGraph.js Workflows
+10.1 Ingestion graph
+
+Purpose: document → structured brain knowledge
+
+Flow:
+
+ingest_document
+extract_text
+chunk_document
+classify_chunks
+extract_principles
+extract_rules
+extract_playbooks
+extract_anti_patterns
+dedupe_merge
+persist_outputs
+10.2 Knowledge answer graph
+
+Purpose: answer a direct question using the brain
+
+Flow:
+
+parse_question
+retrieve_brain_objects
+retrieve_supporting_chunks
+synthesize_answer
+attach_sources
+persist_run
+10.3 Brand mapping graph
+
+Purpose: answer “what matters for this brand?”
+
+Flow:
+
+load_brand_context
+parse_question
+retrieve_relevant_playbooks
+retrieve_relevant_rules
+score_fit_to_brand
+identify_likely_priorities
+identify_likely_anti_patterns
+generate_brand_answer
+persist_run
+10.4 Strategy start graph
+
+Purpose: answer “where should this brand start?”
+
+Flow:
+
+load_brand_context
+retrieve_relevant_playbooks
+retrieve_relevant_principles
+map_to_brand
+group_into_strategic_themes
+identify_missing_data
+generate_starting_recommendation
+persist_run
+11. API Spec
+Brand endpoints
+GET /brands/:id
+POST /brands
+PATCH /brands/:id
+GET /brands/:id/competitors
+POST /brands/:id/competitors
+Document endpoints
+POST /documents/upload
+GET /documents
+GET /documents/:id
+POST /documents/:id/process
+GET /documents/:id/chunks
+Brain object endpoints
+GET /principles
+GET /rules
+GET /playbooks
+GET /playbooks/:id
+GET /anti-patterns
+GET /examples
+Q&A endpoints
+POST /brain/ask
+Body:
+question
+optional brand_id
+optional domain_filter
+optional use_brand_context boolean
+Strategy endpoints
+POST /brain/map-brand
+Body:
+brand_id
+question
+POST /brain/where-to-start
+Body:
+brand_id
+Run history endpoints
+GET /runs
+GET /runs/:id
+Future-compatible data endpoints
+POST /brands/:id/data/upload
+GET /brands/:id/data/assets
+
+These can be stubbed in Phase 1 if needed.
+
+12. Frontend Spec
+App routes
+/
+
+Dashboard / overview
+Shows:
+
+brand summary
+number of documents ingested
+number of canonical playbooks
+latest mappings / answers
+“Where should this brand start?” card
+/brand
+
+Brand setup
+Fields:
+
+name
+ICP
+positioning
+geographies
+product truths
+tone
+competitors
+/knowledge
+
+Knowledge library
+Shows:
+
+uploaded documents
+processing status
+domain tags
+trust levels
+/playbooks
+
+Structured brain explorer
+Shows:
+
+principles
+playbooks
+rules
+anti-patterns
+/ask
+
+Question surface
+Two modes:
+
+general brain answer
+brand-aware answer
+/strategy
+
+Where-to-start output
+Shows:
+
+recommended strategic themes
+why they fit the brand
+relevant playbooks
+likely anti-patterns
+missing data needed next
+/runs
+
+History of answers / mappings / strategy outputs
+
+/runs/:id
+
+Full historical output with sources used
+
+13. UX Requirements
+no emojis
+no generic chatbot look
+treat outputs like analyst memos, not chat fluff
+every major claim should show source basis
+every strategic recommendation should show:
+why it applies
+confidence
+source basis
+what missing data would improve certainty
+14. LLM Routing
+Phase 1 routing
+
+Use only two tiers:
+
+Fast model
+
+For:
+
+chunk classification
+extraction formatting
+tagging
+dedupe assistance
+Strong reasoning model
+
+For:
+
+principle extraction
+playbook extraction
+brand mapping
+strategy-start synthesis
+complex Q&A
+Rule
+
+Do not let the model invent canonical intelligence without source basis.
+Every canonical object should include source references.
+
+15. Trust and Quality Rules
+Source hierarchy
+
+Rank source trust roughly as:
+
+official / primary docs
+high-quality expert sources
+internal strategy docs
+selected blogs
+weaker community commentary
+Canonicalization rule
+
+A principle or playbook should become canonical only if:
+
+supported by enough strong evidence
+not contradicted by higher-trust sources
+expressed clearly enough to be reusable
+
+Otherwise keep it as candidate.
+
+Answering rule
+
+Every answer should separate:
+
+known principle
+brand inference
+uncertainty
+missing data
+16. Scalable Architecture for Later Skills and Self-Learning
+
+This Phase 1 architecture should support later expansion without rewrite.
+
+16.1 Skills architecture later
+
+Later, each skill can sit on top of the same brain:
+
+alternatives-page skill
+GEO content skill
+refresh-page skill
+internal-linking skill
+entity-consistency skill
+comparison-page skill
+
+Each skill should consume:
+
+playbooks
+rules
+brand context
+optional structured data
+
+So the brain becomes the shared intelligence substrate.
+
+16.2 Self-learning later
+
+Do not implement uncontrolled self-learning now.
+But design for it now.
+
+Future learning loop:
+
+ingest new docs or web sources
+extract candidate principles / playbooks
+compare with current canon
+propose merges / updates
+require approval or confidence threshold
+update canon with provenance
+16.3 Data-driven strategy later
+
+When Phase 2 structured uploads mature:
+
+rankings
+traffic
+GEO snapshots
+competitor snapshots
+
+Then the strategy engine can combine:
+
+canonical brain knowledge
+brand context
+observed performance data
+
+That is when audits and 14-day plans become much stronger.
+
+17. Implementation Phases
+Phase 1A — Brain foundation
+
+Build:
+
+DB schema
+document upload
+chunking / embedding
+ingestion graph
+principles / rules / playbooks extraction
+knowledge library UI
+ask endpoint
+Phase 1B — Brand mapper
+
+Build:
+
+brand setup UI
+competitor notes
+brand mapping graph
+where-to-start graph
+strategy output UI
+run history
+Phase 1C — Hardening
+
+Build:
+
+dedupe / merge quality improvements
+source traceability
+confidence display
+seeded demo data
+OpenAPI + generated client
+18. Done Looks Like
+
+Phase 1 is done when:
+
+a brand can be configured
+docs can be uploaded and processed
+source knowledge can be distilled into structured playbooks / principles / rules
+the system can answer SEO/GEO/AEO questions from the brain
+the system can map that intelligence to a configured brand
+the system can produce a “where should this brand start?” output
+outputs show why the recommendation fits and which sources informed it
+all of this runs in one TypeScript Replit workspace
+19. What Not to Build Yet
+
+Do not build yet:
+
+full audit dashboard based on large live data ingestion
+autonomous task execution
+CMS publishing
+Google Drive sync
+scheduled internet scraping
+open-ended self-editing brain
+multi-brand multi-user tenancy
+complex skills runtime
+20. Short product summary
+
+Sieve Phase 1 is a marketing brain and brand-mapping system.
+It ingests SEO/GEO/AEO knowledge, distills it into structured intelligence, and applies that intelligence to one brand to answer questions and recommend where strategy should begin.
+
+If you want, next I’ll rewrite this into a developer-ready implementation spec with:
+
+exact Drizzle schema
+OpenAPI paths
+LangGraph state types
+folder structure for Replit

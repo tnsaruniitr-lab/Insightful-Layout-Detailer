@@ -1,0 +1,46 @@
+Risks & Gaps Worth Addressing
+1. The background job story is underspecified (1A + 1B)
+The plan says POST /documents/:id/process "enqueues a job" but there's no mention of what runs it — no queue, no worker, no BullMQ/pg-boss/inngest setup. LangGraph runs synchronously in-process by default. If you don't define this, the implementer will likely just await the pipeline in the request handler and you'll get timeout issues on large documents.
+
+Fix: Add a task in 1B to define the job execution model — even "run in background via setImmediate + status polling" is a decision that needs to be explicit.
+
+2. The pgvector similarity search in 1B has no index defined (1A)
+The schema task mentions the vector column but doesn't mention creating an HNSW or IVFFlat index on it. Without an index, similarity search works but degrades badly at scale.
+
+Fix: Add CREATE INDEX ... USING hnsw to the schema push task in 1A.
+
+3. The deduplication step ("dedupe_merge") needs a similarity threshold decision
+"Highly similar" in the ingestion pipeline is vague. The implementer will have to pick a cosine similarity threshold (0.85? 0.92?) with no guidance, and that choice meaningfully affects brain quality.
+
+Fix: Specify a threshold range or at minimum flag it as a configurable constant.
+
+4. 1C's polling approach for document status is naive
+Polling GET /documents/:id in a tight loop from the frontend is fragile. At a minimum you need a defined poll interval and a max-retry/timeout. At best you'd use SSE or a WebSocket for status transitions.
+
+Fix: Specify polling interval (e.g. 3s) and a timeout/failure state in the 1C upload flow task.
+
+5. Error handling is absent across all three plans
+What happens when the LLM call in extract_principles fails mid-pipeline? Does the document stay in processing forever? There's no mention of retry logic, dead letter handling, or error status states on raw_text_status.
+
+Fix: Add an error state to raw_text_status and specify that the ingestion graph writes it on unrecoverable failure.
+
+6. The OpenAPI spec task in 1A is doing too much
+Writing a complete OpenAPI spec for 15+ endpoint groups before any backend logic exists is a high-risk task. If the spec is wrong (and it will be), codegen propagates bad types into both 1B and 1C.
+
+Suggestion: Consider a lightweight review gate — have the spec reviewed/approved before codegen is run and route handlers are scaffolded from it.
+
+
+Minor Notes
+
+1A mentions uploaded_data_assets in the schema list but the spec task says "stub only" for data asset endpoints. Make sure the implementer knows the table should exist but the endpoints are minimal.
+1B references pdf-parse or mammoth — pick one. Ambiguity here leads to half-implementations.
+1C has no mention of error boundary handling for failed API calls. Given the AI pipeline can fail, the UI needs graceful degradation states.
+
+
+Verdict
+Ready to execute with 2 mandatory fixes before starting 1B:
+
+Define the background job execution model
+Add the pgvector index to the schema task
+
+Everything else can be addressed during implementation, but those two will cause real pain if left until later. The overall architecture is coherent and well-scoped for a Phase 1.
