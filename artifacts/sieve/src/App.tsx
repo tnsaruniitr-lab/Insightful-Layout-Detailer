@@ -14,6 +14,7 @@ import BrandMapping from "@/pages/map";
 import StrategyOutput from "@/pages/strategy";
 import RunsHistory from "@/pages/runs";
 import RunDetail from "@/pages/run-detail";
+import PlaybooksPage from "@/pages/playbooks";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -24,7 +25,7 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/knowledge" component={KnowledgeHub} />
       <Route path="/brain" component={BrainExplorer} />
-      <Route path="/playbooks" component={BrainExplorer} />
+      <Route path="/playbooks" component={PlaybooksPage} />
       <Route path="/brand" component={BrandProfile} />
       <Route path="/ask" component={AskBrain} />
       <Route path="/map" component={BrandMapping} />

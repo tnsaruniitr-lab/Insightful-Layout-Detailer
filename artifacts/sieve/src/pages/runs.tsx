@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Layout } from "@/components/layout";
 import { useListRuns, ListRunsRunType } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,51 +68,60 @@ export default function RunsHistory() {
           <Card>
             <CardContent className="p-0">
               {runsLoading ? (
-                <div className="p-12 text-center text-muted-foreground">Loading runs...</div>
-              ) : runs && runs.length > 0 ? (
-                <div className="divide-y">
-                  {runs.map((run) => (
-                    <Link
-                      key={run.id}
-                      href={`/runs/${run.id}`}
-                      className="p-4 flex items-center justify-between hover:bg-muted/20 transition-colors cursor-pointer group block"
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className="mt-1 h-10 w-10 bg-primary/10 rounded flex items-center justify-center text-primary shrink-0">
-                          <History className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="font-mono text-xs text-muted-foreground">#{run.id.toString().padStart(5, "0")}</span>
-                            <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                              {RUN_TYPE_LABELS[run.runType] ?? run.runType}
-                            </Badge>
-                            <Badge
-                              variant={run.status === "done" ? "secondary" : run.status === "error" ? "destructive" : "default"}
-                              className="text-[10px]"
-                            >
-                              {run.status}
-                            </Badge>
-                            {run.brandId && (
-                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                                brand #{run.brandId}
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="font-medium text-sm line-clamp-1">
-                            {run.query || "Automated Strategy Generation"}
-                          </p>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {new Date(run.createdAt).toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity pr-4">
-                        <ArrowRight className="h-4 w-4" />
-                      </div>
-                    </Link>
-                  ))}
+                <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-3">
+                  <History className="h-8 w-8 opacity-30 animate-pulse" />
+                  Loading runs...
                 </div>
+              ) : runs && runs.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-20">ID</TableHead>
+                      <TableHead className="w-40">Type</TableHead>
+                      <TableHead>Query / Description</TableHead>
+                      <TableHead className="w-24">Status</TableHead>
+                      <TableHead className="w-40">Timestamp</TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => (
+                      <TableRow
+                        key={run.id}
+                        className="cursor-pointer hover:bg-muted/30 transition-colors group"
+                        onClick={() => window.location.href = `/runs/${run.id}`}
+                      >
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          #{run.id.toString().padStart(5, "0")}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                            {RUN_TYPE_LABELS[run.runType] ?? run.runType}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[300px]">
+                          <span className="text-sm truncate block" title={run.query ?? undefined}>
+                            {run.query || <span className="text-muted-foreground italic">Strategy generation</span>}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={run.status === "done" ? "secondary" : run.status === "error" ? "destructive" : "default"}
+                            className="text-[10px]"
+                          >
+                            {run.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">
+                          {new Date(run.createdAt).toLocaleString()}
+                        </TableCell>
+                        <TableCell>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               ) : (
                 <div className="p-16 text-center text-muted-foreground flex flex-col items-center justify-center">
                   <Search className="h-12 w-12 text-muted-foreground/30 mb-4" />
