@@ -166,6 +166,13 @@ async function extractTextNode(state: IngestionStateType): Promise<Partial<Inges
     const pdfParse = (pdfParseModule as unknown as { default: (buf: Buffer) => Promise<{ text: string }> }).default ?? pdfParseModule;
     const parsed = await pdfParse(fileBuffer as Buffer);
     rawText = parsed.text;
+  } else if (doc.sourceType === "doc") {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ buffer: fileBuffer as Buffer });
+    rawText = result.value;
+    if (result.messages.length > 0) {
+      logger.warn({ docId: state.documentId, warnings: result.messages.length }, "Mammoth DOCX warnings");
+    }
   } else {
     rawText = (fileBuffer as Buffer).toString("utf-8");
   }
