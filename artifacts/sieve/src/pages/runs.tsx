@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { History, AlertCircle, RefreshCw, Search, ArrowRight } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 const RUN_TYPE_LABELS: Record<string, string> = {
   knowledge_answer: "Knowledge Answer",
@@ -16,6 +16,7 @@ const RUN_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function RunsHistory() {
+  const [, setLocation] = useLocation();
   const [runTypeFilter, setRunTypeFilter] = useState<string>("all");
 
   const listParams = {
@@ -89,7 +90,7 @@ export default function RunsHistory() {
                       <TableRow
                         key={run.id}
                         className="cursor-pointer hover:bg-muted/30 transition-colors group"
-                        onClick={() => window.location.href = `/runs/${run.id}`}
+                        onClick={() => setLocation(`/runs/${run.id}`)}
                       >
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           #{run.id.toString().padStart(5, "0")}

@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, Save, X, PlusCircle, Pencil } from "lucide-react";
+import { Trash2, Plus, Save, X, PlusCircle, Pencil, AlertCircle, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -178,10 +178,10 @@ export default function BrandProfile() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
 
-  const { data: brand, isLoading: brandLoading } = useGetBrand(activeBrandId || 0, {
+  const { data: brand, isLoading: brandLoading, isError: brandError, refetch: refetchBrand } = useGetBrand(activeBrandId || 0, {
     query: { enabled: !!activeBrandId, queryKey: ["brands", activeBrandId] },
   });
-  const { data: competitors, isLoading: competitorsLoading } = useGetBrandCompetitors(activeBrandId || 0, {
+  const { data: competitors, isLoading: competitorsLoading, isError: competitorsError, refetch: refetchCompetitors } = useGetBrandCompetitors(activeBrandId || 0, {
     query: { enabled: !!activeBrandId, queryKey: ["brands", activeBrandId, "competitors"] },
   });
 
@@ -270,6 +270,23 @@ export default function BrandProfile() {
             <PlusCircle className="h-4 w-4 mr-2" />Create Brand
           </Button>
           <CreateBrandDialog open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => { setActiveBrandId(id); setShowCreate(false); }} />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (brandError || competitorsError) {
+    return (
+      <Layout>
+        <div className="max-w-4xl mx-auto py-16 text-center space-y-4">
+          <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
+          <h2 className="text-xl font-semibold">Failed to load brand data</h2>
+          <p className="text-muted-foreground text-sm">
+            {brandError ? "Could not load brand profile." : "Could not load competitors."} Please try again.
+          </p>
+          <Button variant="outline" onClick={() => { void refetchBrand(); void refetchCompetitors(); }}>
+            <RefreshCw className="h-4 w-4 mr-2" />Retry
+          </Button>
         </div>
       </Layout>
     );
