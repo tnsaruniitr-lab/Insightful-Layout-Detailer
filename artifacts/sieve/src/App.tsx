@@ -12,6 +12,7 @@ import AskBrain from "@/pages/ask";
 import BrandMapping from "@/pages/map";
 import StrategyOutput from "@/pages/strategy";
 import RunsHistory from "@/pages/runs";
+import RunDetail from "@/pages/run-detail";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -26,6 +27,7 @@ function Router() {
       <Route path="/ask" component={AskBrain} />
       <Route path="/map" component={BrandMapping} />
       <Route path="/strategy" component={StrategyOutput} />
+      <Route path="/runs/:id" component={RunDetail} />
       <Route path="/runs" component={RunsHistory} />
       <Route component={NotFound} />
     </Switch>
