@@ -1,0 +1,199 @@
+1. Overall verdict
+
+👉 Architecture: correct
+👉 Sequencing: correct
+👉 Scope: right
+
+But:
+
+👉 3 subtle issues will affect quality a lot if not fixed
+
+2. Critical fixes before you build
+Issue 1 — similarity normalization (MOST IMPORTANT)
+
+You said:
+
+similarity — cosine distance from pgvector
+
+⚠️ Problem:
+
+pgvector <=> returns distance, not similarity
+distance = lower is better
+your formula assumes higher is better
+Fix
+
+Convert:
+
+similarity = 1 - cosine_distance
+
+Then ensure:
+
+similarity ∈ [0,1]
+
+👉 If you skip this:
+
+scoring breaks silently
+bad objects rank higher
+Issue 2 — frequency_bonus design (very important)
+
+You said:
+
+frequency from traces
+
+⚠️ Risk:
+
+early data bias
+popular ≠ correct
+feedback loop amplifies noise
+Fix
+
+Use capped + dampened version:
+
+frequency_bonus = min(0.1, log(1 + count) * 0.03)
+
+👉 Prevents runaway reinforcement
+
+Issue 3 — source_weight definition (clarify this)
+
+You defined:
+
+number of chunks contributing to object
+
+⚠️ That’s weak proxy
+
+Better version
+source_weight =
+  (# distinct documents supporting object)
+
+Not:
+
+chunks
+fragments
+
+👉 You want cross-source agreement, not chunk density
+
+3. Dedup layer — refine slightly
+
+You proposed:
+
+threshold 0.88
+
+👉 Good, but improve logic:
+
+Better dedup flow
+sort by score
+iterate top 20
+for each:
+compare with selected set
+if similar > 0.88 → skip
+
+👉 Avoid full pairwise O(n²)
+
+Bonus refinement
+
+Prefer keeping object with:
+
+higher score
+AND higher source_weight
+4. Diversity layer — refine logic
+
+You said:
+
+cap principles at 4
+
+👉 Good idea, but don’t make it rigid
+
+Better approach
+
+Soft quota:
+
+max:
+- 5 rules
+- 4 principles
+- 3 playbooks
+- 2 anti-patterns
+
+Only apply if dominance occurs.
+
+👉 Don’t reduce strong signals unnecessarily
+
+5. Scoring formula — final recommended version
+
+Use this:
+
+final_score =
+  (0.6 * similarity)
++ (0.2 * object_confidence)
++ (0.1 * source_weight)
++ (0.05 * frequency_bonus)
++ (0.05 * canonical_boost)
+Why tweak:
+frequency reduced (safer)
+canonical included explicitly
+keeps balance clean
+6. What you should expect after Phase 2
+
+If implemented correctly:
+
+You will see:
+better top 3 objects
+fewer irrelevant ones
+less duplication
+more consistent answers
+You will NOT yet see:
+perfect reasoning
+domain-level intelligence
+full stability
+7. How to validate properly (don’t skip)
+
+For 10 queries:
+
+Check:
+
+Retrieval quality
+top 3 objects clearly relevant?
+Ranking correctness
+any obvious mis-ordering?
+Dedup
+any repeated ideas?
+Diversity
+multiple perspectives present?
+
+👉 This matters more than code correctness
+
+8. One subtle but important insight
+
+👉 Phase 2 is where your system becomes:
+
+“opinionated” instead of “retrieval-based”
+
+Before:
+
+closest = best
+
+After:
+
+best = combination of signals
+9. Final go-ahead
+
+👉 Yes — proceed with this implementation
+👉 With the fixes above applied
+
+10. Next step
+
+After implementation:
+
+👉 share 2–3 traces like:
+
+query
+retrieved objects + scores
+final selected objects
+
+I’ll help you:
+
+tune weights
+fix ranking edge cases
+identify hidden biases
+One-line takeaway
+
+👉 You are now building the real intelligence layer — this is where system quality is actually decided.
