@@ -18,9 +18,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { BrainCircuit, BookOpen, ShieldAlert, CheckCircle, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { BrainCircuit, BookOpen, ShieldAlert, CheckCircle, Info, AlertCircle, RefreshCw } from "lucide-react";
 
-type ObjectType = "principles" | "rules" | "playbooks" | "antipatterns";
+function TabErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="py-12 flex flex-col items-center gap-3 text-center">
+      <AlertCircle className="h-8 w-8 text-destructive" />
+      <p className="font-medium text-destructive text-sm">Failed to load data</p>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        <RefreshCw className="h-3.5 w-3.5 mr-2" />
+        Retry
+      </Button>
+    </div>
+  );
+}
 
 export default function BrainExplorer() {
   const [domainFilter, setDomainFilter] = useState<string>("all");
@@ -31,10 +43,10 @@ export default function BrainExplorer() {
     ...(statusFilter !== "all" ? { status: statusFilter as any } : {})
   };
 
-  const { data: principles, isLoading: principlesLoading } = useListPrinciples(commonParams as any);
-  const { data: rules, isLoading: rulesLoading } = useListRules(commonParams as any);
-  const { data: playbooks, isLoading: playbooksLoading } = useListPlaybooks(commonParams as any);
-  const { data: antipatterns, isLoading: antiPatternsLoading } = useListAntiPatterns(commonParams as any);
+  const { data: principles, isLoading: principlesLoading, isError: principlesError, refetch: refetchPrinciples } = useListPrinciples(commonParams as any);
+  const { data: rules, isLoading: rulesLoading, isError: rulesError, refetch: refetchRules } = useListRules(commonParams as any);
+  const { data: playbooks, isLoading: playbooksLoading, isError: playbooksError, refetch: refetchPlaybooks } = useListPlaybooks(commonParams as any);
+  const { data: antipatterns, isLoading: antiPatternsLoading, isError: antiPatternsError, refetch: refetchAntiPatterns } = useListAntiPatterns(commonParams as any);
 
   const getConfidenceColor = (scoreStr?: string | null) => {
     if (!scoreStr) return "bg-muted text-muted-foreground";
@@ -99,6 +111,8 @@ export default function BrainExplorer() {
           <TabsContent value="principles" className="mt-6">
             {principlesLoading ? (
               <div className="py-12 text-center text-muted-foreground">Loading principles...</div>
+            ) : principlesError ? (
+              <TabErrorState onRetry={() => refetchPrinciples()} />
             ) : principles && principles.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {principles.map(p => (
@@ -126,6 +140,8 @@ export default function BrainExplorer() {
           <TabsContent value="rules" className="mt-6">
             {rulesLoading ? (
               <div className="py-12 text-center text-muted-foreground">Loading rules...</div>
+            ) : rulesError ? (
+              <TabErrorState onRetry={() => refetchRules()} />
             ) : rules && rules.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {rules.map(r => (
@@ -163,6 +179,8 @@ export default function BrainExplorer() {
           <TabsContent value="playbooks" className="mt-6">
             {playbooksLoading ? (
               <div className="py-12 text-center text-muted-foreground">Loading playbooks...</div>
+            ) : playbooksError ? (
+              <TabErrorState onRetry={() => refetchPlaybooks()} />
             ) : playbooks && playbooks.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {playbooks.map(p => (
@@ -204,6 +222,8 @@ export default function BrainExplorer() {
           <TabsContent value="antipatterns" className="mt-6">
             {antiPatternsLoading ? (
               <div className="py-12 text-center text-muted-foreground">Loading anti-patterns...</div>
+            ) : antiPatternsError ? (
+              <TabErrorState onRetry={() => refetchAntiPatterns()} />
             ) : antipatterns && antipatterns.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {antipatterns.map(ap => (

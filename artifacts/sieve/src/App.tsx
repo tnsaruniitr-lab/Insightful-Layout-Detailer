@@ -24,6 +24,7 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/knowledge" component={KnowledgeHub} />
       <Route path="/brain" component={BrainExplorer} />
+      <Route path="/playbooks" component={BrainExplorer} />
       <Route path="/brand" component={BrandProfile} />
       <Route path="/ask" component={AskBrain} />
       <Route path="/map" component={BrandMapping} />
