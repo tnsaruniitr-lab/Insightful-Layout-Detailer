@@ -1,5 +1,4 @@
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { db, pool } from "@workspace/db";
 import {
   brandsTable,
@@ -12,7 +11,7 @@ import {
   mappingRunSourcesTable,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { createStrongModel, createEmbeddings } from "../lib/llm";
+import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
 
 interface SourceRef {
@@ -41,6 +40,7 @@ interface ScoredPlaybook {
 interface BrandMappingInput {
   brandId: number;
   question: string;
+  synthesisModel?: SynthesisModelId;
 }
 
 interface BrandMappingOutput {
@@ -173,8 +173,6 @@ async function retrieveRelevantRulesNode(state: BrandMappingStateType): Promise<
 }
 
 async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
-  const strongModel = createStrongModel();
-
   const hasVec = state.questionEmbedding.length > 0;
   const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
   const apRows = await pool.query<{ id: number; title: string; description: string; signals_json: string; domain_tag: string; risk_level: string }>(
@@ -203,9 +201,7 @@ async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partia
     .map((a) => `[AP:${a.id}] ${a.title} (${a.riskLevel} risk): ${a.description}`)
     .join("\n");
 
-  const response = await withRetry(() => strongModel.invoke([
-    new SystemMessage(
-      `You are a marketing intelligence analyst. Score how well each available playbook fits a specific brand.
+  const systemPrompt = `You are a marketing intelligence analyst. Score how well each available playbook fits a specific brand.
 For each playbook score these six dimensions from 0.0 to 1.0: icpFit, offerFit, geographyRelevance, funnelRelevance, categoryRelevance, strategicLeverage.
 The overall fitScore is the weighted mean (weights: icpFit×0.25, offerFit×0.20, geographyRelevance×0.10, funnelRelevance×0.15, categoryRelevance×0.15, strategicLeverage×0.15).
 
@@ -234,10 +230,9 @@ Structure your response as JSON:
     }
   ]
 }
-Respond ONLY with valid JSON, no markdown.`
-    ),
-    new HumanMessage(
-      `Brand Context:\n${state.brandContext}
+Respond ONLY with valid JSON, no markdown.`;
+
+  const userPrompt = `Brand Context:\n${state.brandContext}
 
 Question: ${state.input.question}
 
@@ -245,11 +240,14 @@ Available Playbooks:\n${playbooksText || "None"}
 
 Available Rules:\n${rulesText || "None"}
 
-Likely Anti-Patterns to Watch:\n${apText || "None"}`
-    ),
-  ]), 2, "score_fit_brand");
+Likely Anti-Patterns to Watch:\n${apText || "None"}`;
 
-  const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+  const text = await invokeSynthesisModel(
+    state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
+    systemPrompt,
+    userPrompt,
+    2
+  );
   const jsonMatch = text.match(/\{[\s\S]*\}/);
 
   let answer: BrandMappingStateType["answer"] = null;

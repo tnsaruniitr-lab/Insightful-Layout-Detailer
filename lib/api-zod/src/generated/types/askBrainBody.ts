@@ -5,10 +5,13 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { AskBrainBodyDomainFilter } from "./askBrainBodyDomainFilter";
+import type { SynthesisModelId } from "./synthesisModelId";
 
 export interface AskBrainBody {
   question: string;
   brandId?: number;
-  domainFilter?: string;
+  domainFilter?: AskBrainBodyDomainFilter;
   useBrandContext?: boolean;
+  synthesisModel?: SynthesisModelId;
 }

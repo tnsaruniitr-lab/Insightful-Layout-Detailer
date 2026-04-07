@@ -6,11 +6,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Settings2, Loader2, ArrowRightCircle, AlertCircle, RefreshCw } from "lucide-react";
 import { StrategyResponseView } from "@/components/strategy-response";
+import { ModelSelector } from "@/components/model-selector";
+import { useModelContext } from "@/contexts/model-context";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 
 export default function StrategyOutput() {
   const { activeBrandId } = useBrandContext();
+  const { synthesisModel } = useModelContext();
   const { toast } = useToast();
 
   const [response, setResponse] = useState<MemoResponse | null>(null);
@@ -25,7 +28,7 @@ export default function StrategyOutput() {
 
     try {
       const result = await getStrategy.mutateAsync({
-        data: { brandId: activeBrandId },
+        data: { brandId: activeBrandId, synthesisModel },
       });
       setResponse(result);
     } catch (err) {
@@ -45,7 +48,10 @@ export default function StrategyOutput() {
   return (
     <Layout>
       <div className="space-y-8 max-w-4xl mx-auto">
-        <div className="text-center space-y-3 py-6">
+        <div className="relative text-center space-y-3 py-6">
+          <div className="absolute right-0 top-6">
+            <ModelSelector />
+          </div>
           <div className="mx-auto h-16 w-16 bg-primary/10 flex items-center justify-center rounded-2xl mb-4">
             <Settings2 className="h-8 w-8 text-primary" />
           </div>

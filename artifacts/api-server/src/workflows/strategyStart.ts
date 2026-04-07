@@ -1,5 +1,4 @@
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { db, pool } from "@workspace/db";
 import {
   brandsTable,
@@ -8,7 +7,7 @@ import {
   mappingRunSourcesTable,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { createStrongModel, createEmbeddings } from "../lib/llm";
+import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
 
 interface SourceRef {
@@ -22,6 +21,7 @@ interface SourceRef {
 
 interface StrategyInput {
   brandId: number;
+  synthesisModel?: SynthesisModelId;
 }
 
 interface StrategyTheme {
@@ -158,8 +158,6 @@ async function retrieveRelevantPrinciplesNode(state: StrategyStateType): Promise
 }
 
 async function generateStrategicRecommendationNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
-  const strongModel = createStrongModel();
-
   const hasVecAp = state.brandEmbedding.length > 0;
   const vecAp = hasVecAp ? `[${state.brandEmbedding.join(",")}]` : null;
   const apRows = await pool.query<{ id: number; title: string; description: string; domain_tag: string; risk_level: string }>(
@@ -186,9 +184,7 @@ async function generateStrategicRecommendationNode(state: StrategyStateType): Pr
     .map((a) => `[AP:${a.id}] ${a.title} (${a.riskLevel} risk, ${a.domainTag}): ${a.description}`)
     .join("\n");
 
-  const response = await withRetry(() => strongModel.invoke([
-    new SystemMessage(
-      `You are a senior marketing strategist. Given a brand profile and the full intelligence library, generate a clear "where to start" strategy.
+  const systemPrompt = `You are a senior marketing strategist. Given a brand profile and the full intelligence library, generate a clear "where to start" strategy.
 Structure your response as JSON with these exact fields:
 {
   "knownPrinciples": "The most relevant principles that define the strategic starting point — cite [P:id] inline. 2-4 sentences per domain.",
@@ -209,20 +205,22 @@ Structure your response as JSON with these exact fields:
   "missingDataSummary": "The single most important data gap in one sentence"
 }
 Return 3-5 themes. Use only IDs from the provided playbooks and anti-patterns lists.
-Respond ONLY with valid JSON, no markdown.`
-    ),
-    new HumanMessage(
-      `Brand Context:\n${state.brandContext}
+Respond ONLY with valid JSON, no markdown.`;
+
+  const userPrompt = `Brand Context:\n${state.brandContext}
 
 Relevant Principles:\n${principlesText || "None available"}
 
 Relevant Playbooks:\n${playbooksText || "None available"}
 
-Anti-Patterns to Watch:\n${apText || "None available"}`
-    ),
-  ]), 2, "generate_strategy");
+Anti-Patterns to Watch:\n${apText || "None available"}`;
 
-  const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+  const text = await invokeSynthesisModel(
+    state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
+    systemPrompt,
+    userPrompt,
+    2
+  );
   const jsonMatch = text.match(/\{[\s\S]*\}/);
 
   let answer: StrategyStateType["answer"] = null;

@@ -1137,6 +1137,29 @@ components:
         - sourceId
         - title
 
+    StrategyTheme:
+      type: object
+      properties:
+        name:
+          type: string
+        rationale:
+          type: string
+        playbookIds:
+          type: array
+          items:
+            type: integer
+        antiPatternIds:
+          type: array
+          items:
+            type: integer
+        missingData:
+          type: ["string", "null"]
+      required:
+        - name
+        - rationale
+        - playbookIds
+        - antiPatternIds
+
     MemoSections:
       type: object
       properties:
@@ -1148,6 +1171,11 @@ components:
           type: string
         missingData:
           type: string
+        themes:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/StrategyTheme"
       required:
         - knownPrinciples
         - uncertainty
@@ -1189,6 +1217,18 @@ components:
         - status
         - createdAt
 
+    SynthesisModelId:
+      type: string
+      enum:
+        - gpt-4o
+        - gpt-4o-mini
+        - claude-opus-4-6
+        - claude-sonnet-4-6
+        - claude-haiku-4-5
+        - gemini-3.1-pro-preview
+        - gemini-2.5-pro
+        - gemini-3-flash-preview
+
     AskBrainBody:
       type: object
       properties:
@@ -1201,6 +1241,8 @@ components:
           enum: [seo, geo, aeo, content, entity, general]
         useBrandContext:
           type: boolean
+        synthesisModel:
+          $ref: "#/components/schemas/SynthesisModelId"
       required:
         - question
 
@@ -1211,6 +1253,8 @@ components:
           type: integer
         question:
           type: string
+        synthesisModel:
+          $ref: "#/components/schemas/SynthesisModelId"
       required:
         - brandId
         - question
@@ -1220,6 +1264,8 @@ components:
       properties:
         brandId:
           type: integer
+        synthesisModel:
+          $ref: "#/components/schemas/SynthesisModelId"
       required:
         - brandId
 

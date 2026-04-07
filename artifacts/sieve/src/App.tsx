@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrandProvider } from "@/hooks/use-brand-context";
+import { ModelProvider } from "@/contexts/model-context";
 import { ErrorBoundary } from "@/components/error-boundary";
 
 import Dashboard from "@/pages/dashboard";
@@ -41,6 +42,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrandProvider>
+        <ModelProvider>
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
             <ErrorBoundary>
@@ -49,6 +51,7 @@ function App() {
           </WouterRouter>
           <Toaster />
         </TooltipProvider>
+        </ModelProvider>
       </BrandProvider>
     </QueryClientProvider>
   );

@@ -8,12 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { BrainCircuit, Loader2, Search, Globe, Building2, AlertCircle } from "lucide-react";
 import { MemoResponseView } from "@/components/memo-response";
+import { ModelSelector } from "@/components/model-selector";
+import { useModelContext } from "@/contexts/model-context";
 import { useToast } from "@/hooks/use-toast";
 
 type AskMode = "general" | "brand";
 
 export default function AskBrain() {
   const { activeBrandId } = useBrandContext();
+  const { synthesisModel } = useModelContext();
   const { toast } = useToast();
 
   const [question, setQuestion] = useState("");
@@ -35,6 +38,7 @@ export default function AskBrain() {
           question,
           brandId: mode === "brand" && activeBrandId ? activeBrandId : undefined,
           useBrandContext: mode === "brand",
+          synthesisModel,
         },
       });
       setResponse(result);
@@ -72,6 +76,10 @@ export default function AskBrain() {
                   onChange={(e) => setQuestion(e.target.value)}
                   disabled={askBrain.isPending}
                 />
+              </div>
+
+              <div className="flex items-center justify-end">
+                <ModelSelector />
               </div>
 
               <div className="flex items-center justify-between gap-4">

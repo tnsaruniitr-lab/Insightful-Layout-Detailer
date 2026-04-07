@@ -369,7 +369,8 @@ export interface StrategyTheme {
   rationale: string;
   playbookIds: number[];
   antiPatternIds: number[];
-  missingData: string;
+  /** @nullable */
+  missingData?: string | null;
 }
 
 export interface MemoSections {
@@ -378,7 +379,6 @@ export interface MemoSections {
   brandInference?: string | null;
   uncertainty: string;
   missingData: string;
-  /** @nullable — populated only for strategy_start runs */
   themes?: StrategyTheme[] | null;
 }
 
@@ -411,20 +411,49 @@ export interface MemoResponse {
   createdAt: string;
 }
 
+export type SynthesisModelId =
+  (typeof SynthesisModelId)[keyof typeof SynthesisModelId];
+
+export const SynthesisModelId = {
+  "gpt-4o": "gpt-4o",
+  "gpt-4o-mini": "gpt-4o-mini",
+  "claude-opus-4-6": "claude-opus-4-6",
+  "claude-sonnet-4-6": "claude-sonnet-4-6",
+  "claude-haiku-4-5": "claude-haiku-4-5",
+  "gemini-31-pro-preview": "gemini-3.1-pro-preview",
+  "gemini-25-pro": "gemini-2.5-pro",
+  "gemini-3-flash-preview": "gemini-3-flash-preview",
+} as const;
+
+export type AskBrainBodyDomainFilter =
+  (typeof AskBrainBodyDomainFilter)[keyof typeof AskBrainBodyDomainFilter];
+
+export const AskBrainBodyDomainFilter = {
+  seo: "seo",
+  geo: "geo",
+  aeo: "aeo",
+  content: "content",
+  entity: "entity",
+  general: "general",
+} as const;
+
 export interface AskBrainBody {
   question: string;
   brandId?: number;
-  domainFilter?: string;
+  domainFilter?: AskBrainBodyDomainFilter;
   useBrandContext?: boolean;
+  synthesisModel?: SynthesisModelId;
 }
 
 export interface MapBrandBody {
   brandId: number;
   question: string;
+  synthesisModel?: SynthesisModelId;
 }
 
 export interface WhereToStartBody {
   brandId: number;
+  synthesisModel?: SynthesisModelId;
 }
 
 export type MappingRunRunType =

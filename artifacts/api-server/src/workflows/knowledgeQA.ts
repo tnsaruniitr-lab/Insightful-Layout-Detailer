@@ -1,5 +1,4 @@
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { db, pool } from "@workspace/db";
 import {
   brandsTable,
@@ -10,7 +9,7 @@ import {
   mappingRunSourcesTable,
 } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
-import { createStrongModel, createEmbeddings } from "../lib/llm";
+import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
 
 interface SourceRef {
@@ -27,6 +26,7 @@ interface QAInput {
   brandId?: number;
   domainFilter?: string;
   useBrandContext?: boolean;
+  synthesisModel?: SynthesisModelId;
 }
 
 interface QAOutput {
@@ -197,8 +197,6 @@ async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAState
 }
 
 async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAStateType>> {
-  const strongModel = createStrongModel();
-
   const principlesContext = state.retrievedPrinciples
     .map((p) => `• [P:${p.id}] ${p.title}: ${p.statement}${p.explanation ? ` — ${p.explanation}` : ""}`)
     .join("\n");
@@ -218,9 +216,7 @@ async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAState
 
   const brandSection = state.brandContext ? `\nBrand Context:\n${state.brandContext}` : "";
 
-  const response = await withRetry(() => strongModel.invoke([
-    new SystemMessage(
-      `You are a senior marketing intelligence analyst. Answer the user's question using the provided brain objects and source chunks.
+  const systemPrompt = `You are a senior marketing intelligence analyst. Answer the user's question using the provided brain objects and source chunks.
 Structure your response as a JSON object with these exact keys:
 {
   "knownPrinciples": "What the intelligence base knows about this topic — cite [P:id], [PB:id], [R:id] inline",
@@ -231,10 +227,9 @@ Structure your response as a JSON object with these exact keys:
   "confidence": 0.0 to 1.0,
   "missingDataSummary": "Top-level gap summary in 1 sentence"
 }
-Every claim must cite a source. Respond ONLY with valid JSON, no markdown.`
-    ),
-    new HumanMessage(
-      `Question: ${state.input.question}${brandSection}
+Every claim must cite a source. Respond ONLY with valid JSON, no markdown.`;
+
+  const userPrompt = `Question: ${state.input.question}${brandSection}
 
 Available Principles:
 ${principlesContext || "None"}
@@ -246,11 +241,14 @@ Available Rules:
 ${rulesContext || "None"}
 
 Supporting Source Chunks:
-${chunksContext || "None"}`
-    ),
-  ]), 2, "synthesize_qa");
+${chunksContext || "None"}`;
 
-  const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+  const text = await invokeSynthesisModel(
+    state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
+    systemPrompt,
+    userPrompt,
+    2
+  );
   const jsonMatch = text.match(/\{[\s\S]*\}/);
 
   if (!jsonMatch) {

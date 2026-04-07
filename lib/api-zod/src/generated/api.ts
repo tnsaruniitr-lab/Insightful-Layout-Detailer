@@ -372,8 +372,22 @@ export const ListExamplesResponse = zod.array(ListExamplesResponseItem);
 export const AskBrainBody = zod.object({
   question: zod.string(),
   brandId: zod.number().optional(),
-  domainFilter: zod.enum(["seo", "geo", "aeo", "content", "entity", "general"]).optional(),
+  domainFilter: zod
+    .enum(["seo", "geo", "aeo", "content", "entity", "general"])
+    .optional(),
   useBrandContext: zod.boolean().optional(),
+  synthesisModel: zod
+    .enum([
+      "gpt-4o",
+      "gpt-4o-mini",
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+      "gemini-3.1-pro-preview",
+      "gemini-2.5-pro",
+      "gemini-3-flash-preview",
+    ])
+    .optional(),
 });
 
 export const AskBrainResponse = zod.object({
@@ -391,6 +405,17 @@ export const AskBrainResponse = zod.object({
     brandInference: zod.string().nullish(),
     uncertainty: zod.string(),
     missingData: zod.string(),
+    themes: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          rationale: zod.string(),
+          playbookIds: zod.array(zod.number()),
+          antiPatternIds: zod.array(zod.number()),
+          missingData: zod.string().nullish(),
+        }),
+      )
+      .nullish(),
   }),
   source_refs: zod.array(
     zod.object({
@@ -418,6 +443,18 @@ export const AskBrainResponse = zod.object({
 export const MapBrandBody = zod.object({
   brandId: zod.number(),
   question: zod.string(),
+  synthesisModel: zod
+    .enum([
+      "gpt-4o",
+      "gpt-4o-mini",
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+      "gemini-3.1-pro-preview",
+      "gemini-2.5-pro",
+      "gemini-3-flash-preview",
+    ])
+    .optional(),
 });
 
 export const MapBrandResponse = zod.object({
@@ -435,6 +472,17 @@ export const MapBrandResponse = zod.object({
     brandInference: zod.string().nullish(),
     uncertainty: zod.string(),
     missingData: zod.string(),
+    themes: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          rationale: zod.string(),
+          playbookIds: zod.array(zod.number()),
+          antiPatternIds: zod.array(zod.number()),
+          missingData: zod.string().nullish(),
+        }),
+      )
+      .nullish(),
   }),
   source_refs: zod.array(
     zod.object({
@@ -461,6 +509,18 @@ export const MapBrandResponse = zod.object({
  */
 export const GetBrandStrategyBody = zod.object({
   brandId: zod.number(),
+  synthesisModel: zod
+    .enum([
+      "gpt-4o",
+      "gpt-4o-mini",
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+      "gemini-3.1-pro-preview",
+      "gemini-2.5-pro",
+      "gemini-3-flash-preview",
+    ])
+    .optional(),
 });
 
 export const GetBrandStrategyResponse = zod.object({
@@ -478,6 +538,17 @@ export const GetBrandStrategyResponse = zod.object({
     brandInference: zod.string().nullish(),
     uncertainty: zod.string(),
     missingData: zod.string(),
+    themes: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          rationale: zod.string(),
+          playbookIds: zod.array(zod.number()),
+          antiPatternIds: zod.array(zod.number()),
+          missingData: zod.string().nullish(),
+        }),
+      )
+      .nullish(),
   }),
   source_refs: zod.array(
     zod.object({

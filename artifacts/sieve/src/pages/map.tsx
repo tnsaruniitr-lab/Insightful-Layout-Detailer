@@ -8,10 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Map as MapIcon, Loader2, Compass } from "lucide-react";
 import { MemoResponseView } from "@/components/memo-response";
+import { ModelSelector } from "@/components/model-selector";
+import { useModelContext } from "@/contexts/model-context";
 import { useToast } from "@/hooks/use-toast";
 
 export default function BrandMapping() {
   const { activeBrandId } = useBrandContext();
+  const { synthesisModel } = useModelContext();
   const { toast } = useToast();
   
   const [question, setQuestion] = useState("");
@@ -28,6 +31,7 @@ export default function BrandMapping() {
         data: {
           brandId: activeBrandId,
           question,
+          synthesisModel,
         }
       });
       setResponse(result);
@@ -39,7 +43,10 @@ export default function BrandMapping() {
   return (
     <Layout>
       <div className="space-y-8 max-w-4xl mx-auto">
-        <div className="text-center space-y-3 py-6">
+        <div className="relative text-center space-y-3 py-6">
+          <div className="absolute right-0 top-6">
+            <ModelSelector />
+          </div>
           <div className="mx-auto h-16 w-16 bg-primary/10 flex items-center justify-center rounded-2xl mb-4">
             <MapIcon className="h-8 w-8 text-primary" />
           </div>

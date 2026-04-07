@@ -5,8 +5,10 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { SynthesisModelId } from "./synthesisModelId";
 
 export interface MapBrandBody {
   brandId: number;
   question: string;
+  synthesisModel?: SynthesisModelId;
 }

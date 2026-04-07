@@ -5,6 +5,7 @@
  * Sieve marketing intelligence API
  * OpenAPI spec version: 0.1.0
  */
+import type { StrategyTheme } from "./strategyTheme";
 
 export interface MemoSections {
   knownPrinciples: string;
@@ -12,4 +13,5 @@ export interface MemoSections {
   brandInference?: string | null;
   uncertainty: string;
   missingData: string;
+  themes?: StrategyTheme[] | null;
 }
