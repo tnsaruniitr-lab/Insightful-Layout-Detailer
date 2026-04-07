@@ -375,7 +375,7 @@ Respond ONLY with valid JSON array, no markdown.`
       domainTag: item.domainTag,
       confidenceScore: String(item.confidenceScore),
       sourceCount: 1,
-      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      sourceRefsJson: JSON.stringify([state.documentId]),
       status: "candidate",
     }).returning();
     if (row) persistedIds.push(row.id);
@@ -451,7 +451,7 @@ Respond ONLY with valid JSON array, no markdown.`
       thenLogic: item.thenLogic,
       domainTag: item.domainTag,
       confidenceScore: String(item.confidenceScore),
-      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      sourceRefsJson: JSON.stringify([state.documentId]),
       status: "candidate",
     }).returning();
     if (row) persistedIds.push(row.id);
@@ -530,7 +530,7 @@ Respond ONLY with valid JSON array, no markdown.`
       expectedOutcomes: item.expectedOutcomes,
       domainTag: item.domainTag,
       confidenceScore: String(item.confidenceScore),
-      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      sourceRefsJson: JSON.stringify([state.documentId]),
       status: "candidate",
     }).returning();
     if (row) {
@@ -615,7 +615,7 @@ Respond ONLY with valid JSON array, no markdown.`
       signalsJson: JSON.stringify(item.signals),
       domainTag: item.domainTag,
       riskLevel: item.riskLevel,
-      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      sourceRefsJson: JSON.stringify([state.documentId]),
       status: "candidate",
     }).returning();
     if (row) persistedIds.push(row.id);
@@ -686,7 +686,7 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     state.persistedPrincipleIds,
     (r) => `${r.title} ${r.statement}`,
     async (existId, existRow, candidate) => {
-      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      const refs = [...new Set([...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")])];
       const existingConf = await pool.query<{ confidence_score: string; source_count: number }>(
         "SELECT confidence_score, source_count FROM principles WHERE id = $1", [existId]
       );
@@ -709,7 +709,7 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     state.persistedRuleIds,
     (r) => `${r.name} ${r.ifCondition} ${r.thenLogic}`,
     async (existId, existRow, candidate) => {
-      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      const refs = [...new Set([...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")])];
       await db.update(rulesTable).set({ sourceRefsJson: JSON.stringify(refs) }).where(eq(rulesTable.id, existId));
     },
     async (ids) => {
@@ -723,7 +723,7 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     state.persistedPlaybookIds,
     (r) => `${r.name} ${r.summary}`,
     async (existId, existRow, candidate) => {
-      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      const refs = [...new Set([...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")])];
       await db.update(playbooksTable).set({ sourceRefsJson: JSON.stringify(refs) }).where(eq(playbooksTable.id, existId));
       await db.delete(playbookStepsTable).where(eq(playbookStepsTable.playbookId, candidate.id));
     },
@@ -738,7 +738,7 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     state.persistedAntiPatternIds,
     (r) => `${r.title} ${r.description}`,
     async (existId, existRow, candidate) => {
-      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      const refs = [...new Set([...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")])];
       await db.update(antiPatternsTable).set({ sourceRefsJson: JSON.stringify(refs) }).where(eq(antiPatternsTable.id, existId));
     },
     async (ids) => {
