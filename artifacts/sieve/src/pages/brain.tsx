@@ -1,25 +1,29 @@
 import { useState } from "react";
 import { Layout } from "@/components/layout";
-import { 
-  useListPrinciples, 
-  useListRules, 
-  useListPlaybooks, 
+import {
+  useListPrinciples,
+  useListRules,
+  useListPlaybooks,
   useListAntiPatterns,
-  ListPrinciplesDomainTag,
-  ListRulesDomainTag,
-  ListPlaybooksDomainTag,
-  ListAntiPatternsDomainTag,
-  ListPrinciplesStatus,
-  ListRulesStatus,
-  ListPlaybooksStatus,
-  ListAntiPatternsStatus
+  Principle,
+  Rule,
+  AntiPattern,
+  Playbook,
 } from "@workspace/api-client-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BrainCircuit, BookOpen, ShieldAlert, CheckCircle, Info, AlertCircle, RefreshCw } from "lucide-react";
+import { BrainObjectDetail } from "@/components/brain-object-detail";
+
+type BrainObjectType = "principle" | "rule" | "playbook" | "anti_pattern";
+
+interface SelectedObject {
+  type: BrainObjectType;
+  object: Principle | Rule | AntiPattern | Playbook;
+}
 
 function TabErrorState({ onRetry }: { onRetry: () => void }) {
   return (
@@ -37,10 +41,11 @@ function TabErrorState({ onRetry }: { onRetry: () => void }) {
 export default function BrainExplorer() {
   const [domainFilter, setDomainFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("canonical");
+  const [selected, setSelected] = useState<SelectedObject | null>(null);
 
   const commonParams = {
     ...(domainFilter !== "all" ? { domain_tag: domainFilter as any } : {}),
-    ...(statusFilter !== "all" ? { status: statusFilter as any } : {})
+    ...(statusFilter !== "all" ? { status: statusFilter as any } : {}),
   };
 
   const { data: principles, isLoading: principlesLoading, isError: principlesError, refetch: refetchPrinciples } = useListPrinciples(commonParams as any);
@@ -55,6 +60,9 @@ export default function BrainExplorer() {
     if (score > 0.5) return "bg-amber-500/10 text-amber-600 border-amber-200";
     return "bg-destructive/10 text-destructive border-destructive/20";
   };
+
+  const select = (type: BrainObjectType, object: Principle | Rule | AntiPattern | Playbook) =>
+    setSelected({ type, object });
 
   return (
     <Layout>
@@ -115,13 +123,17 @@ export default function BrainExplorer() {
               <TabErrorState onRetry={() => refetchPrinciples()} />
             ) : principles && principles.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {principles.map(p => (
-                  <Card key={p.id} className="flex flex-col">
+                {principles.map((p) => (
+                  <Card
+                    key={p.id}
+                    className="flex flex-col cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
+                    onClick={() => select("principle", p)}
+                  >
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start gap-2 mb-2">
                         <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
                         <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
-                          CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + '%' : 'N/A'}
+                          CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
                         </Badge>
                       </div>
                       <CardTitle className="text-base font-semibold leading-tight">{p.title}</CardTitle>
@@ -144,8 +156,12 @@ export default function BrainExplorer() {
               <TabErrorState onRetry={() => refetchRules()} />
             ) : rules && rules.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {rules.map(r => (
-                  <Card key={r.id} className="flex flex-col">
+                {rules.map((r) => (
+                  <Card
+                    key={r.id}
+                    className="flex flex-col cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
+                    onClick={() => select("rule", r)}
+                  >
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start gap-2 mb-2">
                         <div className="flex gap-1">
@@ -153,7 +169,7 @@ export default function BrainExplorer() {
                           <Badge variant="secondary" className="font-mono text-[10px]">{r.ruleType}</Badge>
                         </div>
                         <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(r.confidenceScore)}`}>
-                          CONF: {r.confidenceScore ? Math.round(parseFloat(r.confidenceScore) * 100) + '%' : 'N/A'}
+                          CONF: {r.confidenceScore ? Math.round(parseFloat(r.confidenceScore) * 100) + "%" : "N/A"}
                         </Badge>
                       </div>
                       <CardTitle className="text-base font-semibold leading-tight">{r.name}</CardTitle>
@@ -183,17 +199,21 @@ export default function BrainExplorer() {
               <TabErrorState onRetry={() => refetchPlaybooks()} />
             ) : playbooks && playbooks.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
-                {playbooks.map(p => (
-                  <Card key={p.id}>
+                {playbooks.map((p) => (
+                  <Card
+                    key={p.id}
+                    className="cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
+                    onClick={() => select("playbook", p)}
+                  >
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start gap-2 mb-2">
                         <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
                         <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
-                          CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + '%' : 'N/A'}
+                          CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
                         </Badge>
                       </div>
                       <CardTitle className="text-lg font-serif font-bold">{p.name}</CardTitle>
-                      <CardDescription className="line-clamp-2">{p.summary}</CardDescription>
+                      <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{p.summary}</p>
                     </CardHeader>
                     <CardContent>
                       <div className="flex gap-4 text-xs">
@@ -226,8 +246,12 @@ export default function BrainExplorer() {
               <TabErrorState onRetry={() => refetchAntiPatterns()} />
             ) : antipatterns && antipatterns.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {antipatterns.map(ap => (
-                  <Card key={ap.id} className="flex flex-col border-destructive/30">
+                {antipatterns.map((ap) => (
+                  <Card
+                    key={ap.id}
+                    className="flex flex-col border-destructive/30 cursor-pointer hover:shadow-md hover:border-destructive/60 transition-all"
+                    onClick={() => select("anti_pattern", ap)}
+                  >
                     <CardHeader className="pb-3 bg-destructive/5">
                       <div className="flex justify-between items-start gap-2 mb-2">
                         <Badge variant="outline" className="font-mono text-[10px] border-destructive/20 text-destructive">{ap.domainTag}</Badge>
@@ -253,9 +277,14 @@ export default function BrainExplorer() {
               <div className="py-12 text-center border rounded-lg bg-muted/10 text-muted-foreground">No anti-patterns found matching filters.</div>
             )}
           </TabsContent>
-
         </Tabs>
       </div>
+
+      <BrainObjectDetail
+        type={selected?.type ?? "principle"}
+        object={selected?.object ?? null}
+        onClose={() => setSelected(null)}
+      />
     </Layout>
   );
 }
