@@ -48,30 +48,48 @@ function parseSourceRefs(json?: string | null): Array<{ sourceType?: string; tit
   }
 }
 
-function SourceRefsList({ json }: { json?: string | null }) {
+function sourceTypeToTab(type?: string) {
+  switch (type) {
+    case "playbook": return "playbooks";
+    case "principle": return "principles";
+    case "rule": return "rules";
+    case "anti_pattern": return "anti-patterns";
+    default: return "playbooks";
+  }
+}
+
+function SourceRefsList({ json, onNavigate }: { json?: string | null; onNavigate?: (tab: string) => void }) {
   const refs = parseSourceRefs(json);
   if (refs.length === 0) return null;
   return (
     <div className="space-y-1">
       <p className="text-[10px] font-bold uppercase text-muted-foreground">Source Refs ({refs.length})</p>
       <div className="space-y-1">
-        {refs.map((ref, idx) => (
-          <div key={idx} className="flex items-center gap-2 p-2 rounded text-xs bg-muted/20">
-            <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-[10px] uppercase font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-              {ref.sourceType?.replace("_", " ") ?? "source"}
-            </span>
-            <span className="font-medium">{ref.title ?? `ID: ${ref.id}`}</span>
-          </div>
-        ))}
+        {refs.map((ref, idx) => {
+          const tab = sourceTypeToTab(ref.sourceType);
+          return (
+            <button
+              key={idx}
+              onClick={() => onNavigate?.(tab)}
+              className="w-full flex items-center gap-2 p-2 rounded text-xs bg-muted/20 hover:bg-primary/10 hover:border-primary/20 border border-transparent transition-colors text-left cursor-pointer"
+            >
+              <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-[10px] uppercase font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                {ref.sourceType?.replace("_", " ") ?? "source"}
+              </span>
+              <span className="font-medium">{ref.title ?? `ID: ${ref.id}`}</span>
+              <ChevronRight className="h-3 w-3 text-muted-foreground ml-auto shrink-0" />
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 function PlaybookDetailDialog({
-  playbook, open, onClose,
-}: { playbook: PlaybookWithSteps; open: boolean; onClose: () => void }) {
+  playbook, open, onClose, onNavigate,
+}: { playbook: PlaybookWithSteps; open: boolean; onClose: () => void; onNavigate?: (tab: string) => void }) {
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
 
   const toggleStep = (id: number) => {
@@ -159,7 +177,7 @@ function PlaybookDetailDialog({
               </div>
             </div>
           )}
-          <SourceRefsList json={playbook.sourceRefsJson} />
+          <SourceRefsList json={playbook.sourceRefsJson} onNavigate={(tab) => { onNavigate?.(tab); onClose(); }} />
         </div>
       </DialogContent>
     </Dialog>
@@ -266,7 +284,7 @@ function SkeletonGrid() {
   );
 }
 
-function PlaybooksTab() {
+function PlaybooksTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [domain, setDomain] = useState("all");
   const [status, setStatus] = useState("canonical");
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -299,7 +317,14 @@ function PlaybooksTab() {
           ))}
         </div>
       )}
-      {selected && <PlaybookDetailDialog playbook={selected} open={!!selectedId} onClose={() => setSelectedId(null)} />}
+      {selected && (
+        <PlaybookDetailDialog
+          playbook={selected}
+          open={!!selectedId}
+          onClose={() => setSelectedId(null)}
+          onNavigate={onNavigate}
+        />
+      )}
     </div>
   );
 }
@@ -395,6 +420,8 @@ function AntiPatternsTab() {
 }
 
 export default function PlaybooksPage() {
+  const [activeTab, setActiveTab] = useState("playbooks");
+
   return (
     <Layout>
       <div className="space-y-6 max-w-6xl mx-auto">
@@ -403,7 +430,7 @@ export default function PlaybooksPage() {
           <p className="text-muted-foreground">Browse canonical and candidate intelligence objects extracted from knowledge documents.</p>
         </div>
 
-        <Tabs defaultValue="playbooks">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="playbooks" className="flex items-center gap-1.5">
               <BookOpen className="h-3.5 w-3.5" />Playbooks
@@ -418,7 +445,7 @@ export default function PlaybooksPage() {
               <AlertTriangle className="h-3.5 w-3.5" />Anti-Patterns
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="playbooks" className="mt-4"><PlaybooksTab /></TabsContent>
+          <TabsContent value="playbooks" className="mt-4"><PlaybooksTab onNavigate={setActiveTab} /></TabsContent>
           <TabsContent value="principles" className="mt-4"><PrinciplesTab /></TabsContent>
           <TabsContent value="rules" className="mt-4"><RulesTab /></TabsContent>
           <TabsContent value="anti-patterns" className="mt-4"><AntiPatternsTab /></TabsContent>
