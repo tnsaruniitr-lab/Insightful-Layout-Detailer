@@ -1,0 +1,161 @@
+Good — Phase 1 is executed correctly.
+This is now a controlled system instead of a noisy one.
+
+Now the next step is not adding features randomly.
+It’s tightening the selection engine (retrieval + ranking).
+
+1. Where you are now
+
+👉 System state:
+
+clean context to LLM ✅
+trace visibility ✅
+still weak ranking ❌
+
+So:
+
+👉 LLM quality is now capped by what gets selected
+
+2. What Phase 2 should do (core goal)
+
+👉 Ensure the best objects are selected — not just closest ones
+
+3. Phase 2 — exact priorities
+
+Do these in order.
+
+Step 1 — Add unified scoring (highest impact)
+
+Right now:
+
+per-type retrieval
+weak ranking
+Build this:
+final_score =
+  (0.6 * similarity)
++ (0.2 * object_confidence)
++ (0.1 * source_weight)
++ (0.1 * frequency_bonus)
+Then:
+
+👉 Merge all object types into ONE ranked list
+
+Why this matters
+
+Fixes:
+
+weak objects entering prompt
+better cross-type competition
+higher relevance
+Step 2 — Replace “canonical first” logic
+
+Current:
+
+canonical > candidate (hard)
+Change to:
+canonical_boost = +0.05 to score
+
+👉 makes it influence, not dominate
+
+Step 3 — Deduplication layer (very important now)
+
+Now that context is small (12):
+
+👉 duplicates are costly
+
+Do:
+cluster top ~20 retrieved objects
+remove near-duplicates
+keep best (confidence + source)
+Step 4 — Use traces to validate (critical)
+
+Now you have trace data — use it.
+
+For 10 queries:
+
+Check:
+
+were top objects actually relevant?
+were better ones missed?
+were duplicates present?
+
+👉 This is where you tune scoring
+
+Step 5 — Add soft diversity (optional but useful)
+
+After ranking:
+
+Ensure mix like:
+
+3–4 rules
+2–3 principles
+1–2 anti-patterns
+rest playbooks
+
+👉 improves reasoning coverage
+
+4. What NOT to do yet
+
+Avoid:
+
+❌ changing prompts
+❌ adding more data
+❌ improving extraction yet
+❌ switching embedding models
+
+5. What improvement you should expect
+
+After Phase 2:
+
+👉 You will see:
+
+more relevant objects in prompt
+fewer weak/irrelevant ones
+clearer, more consistent answers
+
+👉 Not yet:
+
+perfect outputs
+deep reasoning improvements
+6. How to validate success (very important)
+
+Pick 10 real queries.
+
+For each:
+
+Before Phase 2:
+save retrieved objects
+save answer
+After Phase 2:
+compare:
+
+Ask:
+
+are top objects clearly better?
+did answer improve noticeably?
+7. One key insight
+
+👉 Phase 1 fixed what goes in (cleanliness)
+👉 Phase 2 fixes what gets chosen (intelligence)
+
+8. Final plan (clean)
+
+Tell Replit:
+
+👉 “Proceed with Phase 2:
+
+unified cross-type scoring
+remove canonical hard ordering
+add deduplication
+validate using query_traces on 10 queries”
+9. One-line takeaway
+
+👉 You’ve cleaned the input — now make selection smarter.
+
+Next
+
+Once Phase 2 is done, share:
+
+3–5 trace examples (retrieved objects + scores)
+
+I’ll help you tune scoring — that’s where the real quality jump happens.
