@@ -20,11 +20,11 @@ export default function RunsHistory() {
     limit: 50
   };
 
-  const { data: runs, isLoading: runsLoading } = useListRuns(listParams, { query: { enabled: true } });
+  const { data: runs, isLoading: runsLoading } = useListRuns(listParams);
   
   const { data: selectedRun, isLoading: runDetailsLoading } = useGetRun(
     selectedRunId || 0,
-    { query: { enabled: !!selectedRunId } }
+    { query: { enabled: !!selectedRunId, queryKey: ['runs', selectedRunId] } }
   );
 
   // Convert MappingRunDetail back to MemoResponse shape for viewing

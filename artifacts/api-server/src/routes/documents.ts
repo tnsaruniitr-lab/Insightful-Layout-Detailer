@@ -12,6 +12,7 @@ import {
   GetDocumentChunksQueryParams,
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { fireAndForget } from "../lib/jobRunner";
 
 type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
 type DocStatus = "pending" | "processing" | "done" | "error";
@@ -152,6 +153,8 @@ router.post(
       .update(documentsTable)
       .set({ rawTextStatus: "processing" })
       .where(eq(documentsTable.id, doc.id));
+
+    fireAndForget(doc.id);
 
     res.json({ status: "processing" });
   }

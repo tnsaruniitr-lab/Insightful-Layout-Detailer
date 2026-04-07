@@ -9,18 +9,12 @@ export default function Dashboard() {
   const { activeBrandId } = useBrandContext();
   
   const { data: brand, isLoading: brandLoading } = useGetBrand(activeBrandId || 0, {
-    query: { enabled: !!activeBrandId }
+    query: { enabled: !!activeBrandId, queryKey: ['brands', activeBrandId] }
   });
 
-  const { data: runs, isLoading: runsLoading } = useListRuns(
-    { limit: 5 },
-    { query: { enabled: true } }
-  );
+  const { data: runs, isLoading: runsLoading } = useListRuns({ limit: 5 });
 
-  const { data: docs, isLoading: docsLoading } = useListDocuments(
-    { status: "done" },
-    { query: { enabled: true } }
-  );
+  const { data: docs, isLoading: docsLoading } = useListDocuments({ status: "done" });
 
   return (
     <Layout>

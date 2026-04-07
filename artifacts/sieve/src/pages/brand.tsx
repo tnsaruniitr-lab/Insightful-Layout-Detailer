@@ -16,8 +16,8 @@ export default function BrandProfile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
-  const { data: brand, isLoading: brandLoading } = useGetBrand(activeBrandId || 0, { query: { enabled: !!activeBrandId } });
-  const { data: competitors, isLoading: competitorsLoading } = useGetBrandCompetitors(activeBrandId || 0, { query: { enabled: !!activeBrandId } });
+  const { data: brand, isLoading: brandLoading } = useGetBrand(activeBrandId || 0, { query: { enabled: !!activeBrandId, queryKey: ['brands', activeBrandId] } });
+  const { data: competitors, isLoading: competitorsLoading } = useGetBrandCompetitors(activeBrandId || 0, { query: { enabled: !!activeBrandId, queryKey: ['brands', activeBrandId, 'competitors'] } });
   
   const updateBrand = useUpdateBrand();
   const createCompetitor = useCreateCompetitor();

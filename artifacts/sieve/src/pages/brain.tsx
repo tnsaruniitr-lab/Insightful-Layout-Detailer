@@ -31,10 +31,10 @@ export default function BrainExplorer() {
     ...(statusFilter !== "all" ? { status: statusFilter as any } : {})
   };
 
-  const { data: principles, isLoading: principlesLoading } = useListPrinciples(commonParams as any, { query: { enabled: true } });
-  const { data: rules, isLoading: rulesLoading } = useListRules(commonParams as any, { query: { enabled: true } });
-  const { data: playbooks, isLoading: playbooksLoading } = useListPlaybooks(commonParams as any, { query: { enabled: true } });
-  const { data: antipatterns, isLoading: antiPatternsLoading } = useListAntiPatterns(commonParams as any, { query: { enabled: true } });
+  const { data: principles, isLoading: principlesLoading } = useListPrinciples(commonParams as any);
+  const { data: rules, isLoading: rulesLoading } = useListRules(commonParams as any);
+  const { data: playbooks, isLoading: playbooksLoading } = useListPlaybooks(commonParams as any);
+  const { data: antipatterns, isLoading: antiPatternsLoading } = useListAntiPatterns(commonParams as any);
 
   const getConfidenceColor = (scoreStr?: string | null) => {
     if (!scoreStr) return "bg-muted text-muted-foreground";

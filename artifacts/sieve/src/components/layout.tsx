@@ -21,7 +21,7 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
-  const { data: health, isError } = useHealthCheck({ query: { refetchInterval: 30000 } });
+  const { data: health, isError } = useHealthCheck({ query: { refetchInterval: 30000, queryKey: ['healthz'] } });
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: Activity },
@@ -44,9 +44,9 @@ export function Layout({ children }: LayoutProps) {
           </div>
           <div className="flex items-center justify-center">
             {isError || health?.status !== "ok" ? (
-              <WifiOff className="h-4 w-4 text-destructive" title="API Disconnected" />
+              <WifiOff className="h-4 w-4 text-destructive" aria-label="API Disconnected" />
             ) : (
-              <Wifi className="h-4 w-4 text-emerald-500" title="API Connected" />
+              <Wifi className="h-4 w-4 text-emerald-500" aria-label="API Connected" />
             )}
           </div>
         </div>

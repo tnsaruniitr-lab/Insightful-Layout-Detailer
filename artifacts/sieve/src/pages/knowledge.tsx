@@ -43,7 +43,7 @@ export default function KnowledgeHub() {
     ...(statusFilter !== "all" ? { status: statusFilter as DocumentRawTextStatus } : {})
   };
 
-  const { data: documents, isLoading: docsLoading } = useListDocuments(listParams, { query: { enabled: true } });
+  const { data: documents, isLoading: docsLoading } = useListDocuments(listParams);
   
   const uploadDoc = useUploadDocument();
   const processDoc = useProcessDocument();

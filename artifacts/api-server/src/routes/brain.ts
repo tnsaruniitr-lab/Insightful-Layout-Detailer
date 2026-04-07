@@ -21,6 +21,7 @@ import {
   MapBrandBody,
   GetBrandStrategyBody,
 } from "@workspace/api-zod";
+import { logger } from "../lib/logger";
 
 type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
 type BrainStatus = "canonical" | "candidate";
@@ -146,34 +147,6 @@ router.get("/examples", async (req: Request, res: Response): Promise<void> => {
   res.json(rows);
 });
 
-function buildPlaceholderMemo(
-  runId: number,
-  runType: "knowledge_answer" | "brand_mapping" | "strategy_start",
-  query: string | null,
-  createdAt: Date
-) {
-  return {
-    id: runId,
-    runType,
-    query,
-    rationale_summary:
-      "AI pipeline not yet initialised — placeholder response pending Task 1B implementation.",
-    confidence: null,
-    missing_data:
-      "No AI pipeline available yet. Brain knowledge objects must be ingested before analysis can run.",
-    sections: {
-      knownPrinciples:
-        "No principles have been extracted yet. Upload and process knowledge documents to populate the brain.",
-      brandInference: null,
-      uncertainty: "High uncertainty — AI extraction pipeline is pending implementation.",
-      missingData: "Ingestion pipeline required. No embeddings or brain objects available.",
-    },
-    source_refs: [],
-    status: "done",
-    createdAt,
-  };
-}
-
 router.post("/brain/ask", async (req: Request, res: Response): Promise<void> => {
   const parsed = AskBrainBody.safeParse(req.body);
   if (!parsed.success) {
@@ -182,24 +155,40 @@ router.post("/brain/ask", async (req: Request, res: Response): Promise<void> => 
   }
   const { question, brandId } = parsed.data;
   try {
-    const { runQaGraph } = await import("../pipelines/qa");
-    const result = await runQaGraph(parsed.data);
+    const { runKnowledgeQAGraph } = await import("../workflows/knowledgeQA");
+    const result = await runKnowledgeQAGraph(parsed.data);
     res.json(result);
-  } catch (_err) {
+  } catch (err) {
+    logger.error({ err }, "QA graph failed");
     const [run] = await db
       .insert(mappingRunsTable)
       .values({
         brandId: brandId ?? null,
         query: question,
         runType: "knowledge_answer",
-        status: "done",
+        status: "error",
         outputJson: JSON.stringify({}),
-        rationale_summary: "Placeholder — AI pipeline pending.",
-        missing_data:
-          "No AI pipeline available yet. Brain knowledge objects must be ingested before analysis can run.",
+        rationale_summary: "Pipeline error — see server logs.",
+        missing_data: "Pipeline failed. Check that documents have been processed and brain objects exist.",
       })
       .returning();
-    res.json(buildPlaceholderMemo(run.id, "knowledge_answer", question, run.createdAt));
+    res.status(500).json({
+      id: run.id,
+      runType: "knowledge_answer",
+      query: question,
+      rationale_summary: "An error occurred running the QA pipeline.",
+      confidence: null,
+      missing_data: "Pipeline error. Ensure documents are ingested and the AI API keys are configured.",
+      sections: {
+        knownPrinciples: "Pipeline error — no analysis available.",
+        brandInference: null,
+        uncertainty: "High — pipeline failed to execute.",
+        missingData: err instanceof Error ? err.message : "Unknown error.",
+      },
+      source_refs: [],
+      status: "error",
+      createdAt: run.createdAt,
+    });
   }
 });
 
@@ -211,24 +200,40 @@ router.post("/brain/map-brand", async (req: Request, res: Response): Promise<voi
   }
   const { brandId, question } = parsed.data;
   try {
-    const { runBrandMappingGraph } = await import("../pipelines/brandMapping");
+    const { runBrandMappingGraph } = await import("../workflows/brandMapping");
     const result = await runBrandMappingGraph(parsed.data);
     res.json(result);
-  } catch (_err) {
+  } catch (err) {
+    logger.error({ err }, "Brand mapping graph failed");
     const [run] = await db
       .insert(mappingRunsTable)
       .values({
         brandId,
         query: question,
         runType: "brand_mapping",
-        status: "done",
+        status: "error",
         outputJson: JSON.stringify({}),
-        rationale_summary: "Placeholder — AI pipeline pending.",
-        missing_data:
-          "No AI pipeline available yet. Brand mapping requires ingested documents.",
+        rationale_summary: "Pipeline error.",
+        missing_data: "Brand mapping pipeline failed.",
       })
       .returning();
-    res.json(buildPlaceholderMemo(run.id, "brand_mapping", question, run.createdAt));
+    res.status(500).json({
+      id: run.id,
+      runType: "brand_mapping",
+      query: question,
+      rationale_summary: "An error occurred running the brand mapping pipeline.",
+      confidence: null,
+      missing_data: "Pipeline error. Ensure brand exists and AI API keys are configured.",
+      sections: {
+        knownPrinciples: "Pipeline error — no analysis available.",
+        brandInference: null,
+        uncertainty: "High — pipeline failed.",
+        missingData: err instanceof Error ? err.message : "Unknown error.",
+      },
+      source_refs: [],
+      status: "error",
+      createdAt: run.createdAt,
+    });
   }
 });
 
@@ -240,24 +245,40 @@ router.post("/brain/where-to-start", async (req: Request, res: Response): Promis
   }
   const { brandId } = parsed.data;
   try {
-    const { runStrategyGraph } = await import("../pipelines/strategy");
-    const result = await runStrategyGraph(parsed.data);
+    const { runStrategyStartGraph } = await import("../workflows/strategyStart");
+    const result = await runStrategyStartGraph(parsed.data);
     res.json(result);
-  } catch (_err) {
+  } catch (err) {
+    logger.error({ err }, "Strategy graph failed");
     const [run] = await db
       .insert(mappingRunsTable)
       .values({
         brandId,
         query: null,
         runType: "strategy_start",
-        status: "done",
+        status: "error",
         outputJson: JSON.stringify({}),
-        rationale_summary: "Placeholder — strategy pipeline pending.",
-        missing_data:
-          "Strategy analysis requires ingested knowledge documents and brand data.",
+        rationale_summary: "Pipeline error.",
+        missing_data: "Strategy pipeline failed.",
       })
       .returning();
-    res.json(buildPlaceholderMemo(run.id, "strategy_start", null, run.createdAt));
+    res.status(500).json({
+      id: run.id,
+      runType: "strategy_start",
+      query: null,
+      rationale_summary: "An error occurred running the strategy pipeline.",
+      confidence: null,
+      missing_data: "Pipeline error. Ensure brand exists, documents are ingested, and AI API keys are configured.",
+      sections: {
+        knownPrinciples: "Pipeline error — no strategy available.",
+        brandInference: null,
+        uncertainty: "High — pipeline failed.",
+        missingData: err instanceof Error ? err.message : "Unknown error.",
+      },
+      source_refs: [],
+      status: "error",
+      createdAt: run.createdAt,
+    });
   }
 });
 
