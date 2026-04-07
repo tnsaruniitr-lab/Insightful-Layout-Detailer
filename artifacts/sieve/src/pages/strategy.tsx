@@ -31,7 +31,7 @@ export default function StrategyOutput() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to generate strategy output";
       setSubmitError(msg);
-      toast({ title: "Strategy generation failed", description: msg, variant: "destructive" });
+      toast({ title: "The intelligence pipeline encountered an error", description: msg, variant: "destructive" });
     }
   };
 
@@ -72,7 +72,7 @@ export default function StrategyOutput() {
           <Card className="border-destructive/30 bg-destructive/5">
             <CardContent className="p-8 flex flex-col items-center gap-3 text-center">
               <AlertCircle className="h-8 w-8 text-destructive" />
-              <p className="font-medium text-destructive">Strategy generation failed</p>
+              <p className="font-medium text-destructive">The intelligence pipeline encountered an error</p>
               <p className="text-sm text-muted-foreground max-w-sm">{submitError}</p>
               <Button variant="outline" size="sm" onClick={handleGenerate} disabled={getStrategy.isPending}>
                 <RefreshCw className="h-3.5 w-3.5 mr-2" />
