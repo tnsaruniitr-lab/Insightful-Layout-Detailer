@@ -49,6 +49,7 @@ interface QAOutput {
     missingData: string;
   };
   source_refs: SourceRef[];
+  scoring_trace: ScoringTrace | null;
   status: string;
   createdAt: Date;
 }
@@ -372,6 +373,7 @@ async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>>
       missingData: answer.missingData,
     },
     source_refs: sourceRefs,
+    scoring_trace: state.scoringTrace ?? null,
     status: "done",
     createdAt: run.createdAt,
   };

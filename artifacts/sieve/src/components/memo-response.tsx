@@ -1,8 +1,9 @@
-import { MemoResponse, MappingRunDetail, SourceRef, SourceRefSourceType } from "@workspace/api-client-react";
+import { useState } from "react";
+import { MemoResponse, MemoScoringTrace, ScoringTraceCandidateSummary, MappingRunDetail, SourceRef, SourceRefSourceType } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { FileText, AlertTriangle, BookOpen, Brain, HelpCircle, Database } from "lucide-react";
+import { FileText, AlertTriangle, BookOpen, Brain, HelpCircle, Database, ChevronDown, ChevronRight, Zap, Clock, Filter, Layers } from "lucide-react";
 
 interface MemoResponseViewProps {
   memo: MemoResponse;
@@ -71,6 +72,218 @@ function SourcesPanel({ sourceRefs }: { sourceRefs: SourceRef[] }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TYPE_COLORS: Record<string, string> = {
+  principle: "text-violet-600 bg-violet-50 border-violet-200",
+  playbook: "text-blue-600 bg-blue-50 border-blue-200",
+  rule: "text-amber-600 bg-amber-50 border-amber-200",
+  anti_pattern: "text-red-600 bg-red-50 border-red-200",
+};
+
+function scoreBar(score: number) {
+  const pct = Math.round(score * 100);
+  const color = score >= 0.65 ? "bg-emerald-400" : score >= 0.5 ? "bg-amber-400" : "bg-red-400";
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[10px] font-mono tabular-nums">{score.toFixed(3)}</span>
+    </div>
+  );
+}
+
+function CandidateRow({ c, rank, dimmed }: { c: ScoringTraceCandidateSummary; rank?: number; dimmed?: boolean }) {
+  const typeClass = TYPE_COLORS[c.type] ?? "text-muted-foreground bg-muted border-border";
+  return (
+    <tr className={`border-b last:border-0 transition-opacity ${dimmed ? "opacity-40" : ""}`}>
+      {rank != null && (
+        <td className="px-2 py-1.5 text-center text-[10px] font-mono text-muted-foreground">{rank}</td>
+      )}
+      <td className="px-2 py-1.5">
+        <span className={`text-[9px] px-1.5 py-0.5 rounded border font-mono uppercase ${typeClass}`}>
+          {c.type.replace("_", " ")}
+        </span>
+      </td>
+      <td className="px-2 py-1.5 max-w-[200px]">
+        <span className="text-[11px] line-clamp-1" title={c.title}>{c.title}</span>
+        {c.isCanonical && <span className="ml-1 text-[8px] text-emerald-600 font-mono uppercase">canon</span>}
+      </td>
+      <td className="px-2 py-1.5">{scoreBar(c.finalScore)}</td>
+      <td className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground tabular-nums">{c.similarity.toFixed(3)}</td>
+      <td className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground tabular-nums">{c.confidence.toFixed(2)}</td>
+    </tr>
+  );
+}
+
+function RetrievalTracePanel({ trace }: { trace: MemoScoringTrace }) {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"candidates" | "dedup" | "diversity" | "final">("candidates");
+
+  const dedupCount = trace.removedByDedup.length;
+  const diversityCount = trace.removedByDiversity.length;
+  const finalCount = trace.finalSelected.length;
+
+  return (
+    <div className="rounded-md border border-dashed border-muted-foreground/30 overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          {open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Retrieval Trace</span>
+          <span className="text-[10px] font-mono text-muted-foreground/70">
+            {trace.totalCandidatesReceived} candidates → {dedupCount} deduped → {diversityCount} diversity-capped → {finalCount} selected
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {trace.timings.total_ms}ms
+          </span>
+          {trace.frequencyGuardActive && (
+            <span className="text-amber-600">freq-guard active</span>
+          )}
+          {trace.dedupFallbackUsed && (
+            <span className="text-orange-600">dedup fallback</span>
+          )}
+        </div>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 pt-3 space-y-3">
+          <div className="flex items-center gap-4 text-[10px] font-mono text-muted-foreground border-b pb-2">
+            <span className="flex items-center gap-1"><Zap className="h-3 w-3" /> scoring {trace.timings.scoring_ms}ms</span>
+            <span className="flex items-center gap-1"><Filter className="h-3 w-3" /> dedup {trace.timings.dedup_ms}ms (threshold: {trace.dedupThreshold.toFixed(2)})</span>
+            <span className="flex items-center gap-1"><Layers className="h-3 w-3" /> diversity {trace.timings.diversity_ms}ms</span>
+            <span>total traces in DB: {trace.totalTraceCount}</span>
+          </div>
+
+          <div className="flex gap-1 text-[10px]">
+            {(["candidates", "dedup", "diversity", "final"] as const).map((t) => {
+              const labels: Record<typeof t, string> = {
+                candidates: `Top ${trace.top20BeforeDedup.length} Candidates`,
+                dedup: `Dedup Removed (${dedupCount})`,
+                diversity: `Diversity Removed (${diversityCount})`,
+                final: `Final Selected (${finalCount})`,
+              };
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`px-2.5 py-1 rounded font-mono transition-colors ${tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
+                >
+                  {labels[t]}
+                </button>
+              );
+            })}
+          </div>
+
+          {tab === "candidates" && (
+            <div className="overflow-x-auto rounded border">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-muted/50 border-b">
+                  <tr>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">#</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Type</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Title</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Score</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Sim</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Conf</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trace.top20BeforeDedup.map((c, i) => {
+                    const wasRemoved =
+                      trace.removedByDedup.some((r) => r.removed.id === c.id && r.removed.type === c.type) ||
+                      trace.removedByDiversity.some((r) => r.removed.id === c.id && r.removed.type === c.type);
+                    return <CandidateRow key={`${c.type}-${c.id}`} c={c} rank={i + 1} dimmed={wasRemoved} />;
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {tab === "dedup" && (
+            <div className="space-y-2">
+              {dedupCount === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">No objects removed by deduplication.</p>
+              ) : (
+                trace.removedByDedup.map((r, i) => (
+                  <div key={i} className="rounded border bg-red-50/40 p-2.5 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <p className="text-[11px] font-semibold text-red-700 line-clamp-1">{r.removed.title}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          {r.removed.type.replace("_", " ")} #{r.removed.id} · score {r.removed.finalScore.toFixed(3)}
+                        </p>
+                      </div>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 shrink-0">
+                        DEDUP
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Collided with <span className="font-semibold">{r.collidedWithTitle}</span>{" "}
+                      ({r.collidedWithType.replace("_", " ")} #{r.collidedWithId}) at{" "}
+                      <span className="font-mono text-red-600">{(r.embeddingSimilarity * 100).toFixed(1)}%</span> embedding similarity
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {tab === "diversity" && (
+            <div className="space-y-2">
+              {diversityCount === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">No objects removed by diversity cap.</p>
+              ) : (
+                trace.removedByDiversity.map((r, i) => (
+                  <div key={i} className="rounded border bg-orange-50/40 p-2.5 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <p className="text-[11px] font-semibold text-orange-700 line-clamp-1">{r.removed.title}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          {r.removed.type.replace("_", " ")} #{r.removed.id} · score {r.removed.finalScore.toFixed(3)}
+                        </p>
+                      </div>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 border border-orange-200 shrink-0">
+                        DIVERSITY
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">{r.reason}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {tab === "final" && (
+            <div className="overflow-x-auto rounded border">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-muted/50 border-b">
+                  <tr>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Type</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Title</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Score</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Sim</th>
+                    <th className="px-2 py-1.5 text-[10px] font-mono text-muted-foreground">Conf</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trace.finalSelected.map((c) => (
+                    <CandidateRow key={`${c.type}-${c.id}`} c={c} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -191,6 +404,10 @@ export function MemoResponseView({ memo }: MemoResponseViewProps) {
       </Card>
 
       <SourcesPanel sourceRefs={memo.source_refs} />
+
+      {memo.scoring_trace && (
+        <RetrievalTracePanel trace={memo.scoring_trace} />
+      )}
     </div>
   );
 }

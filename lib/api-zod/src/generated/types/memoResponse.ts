@@ -9,6 +9,54 @@ import type { MemoResponseRunType } from "./memoResponseRunType";
 import type { MemoSections } from "./memoSections";
 import type { SourceRef } from "./sourceRef";
 
+export interface ScoringTraceCandidateSummary {
+  id: number;
+  type: string;
+  title: string;
+  similarity: number;
+  confidence: number;
+  sourceWeight: number;
+  frequencyBonus: number;
+  canonicalBoost: number;
+  finalScore: number;
+  distinctDocs: number;
+  frequencyCount: number;
+  isCanonical: boolean;
+}
+
+export interface ScoringTraceDedupRemoval {
+  removed: ScoringTraceCandidateSummary;
+  collidedWithId: number;
+  collidedWithType: string;
+  collidedWithTitle: string;
+  embeddingSimilarity: number;
+}
+
+export interface ScoringTraceDiversityRemoval {
+  removed: ScoringTraceCandidateSummary;
+  reason: string;
+}
+
+export interface MemoScoringTrace {
+  queryLabel: string;
+  totalCandidatesReceived: number;
+  frequencyGuardActive: boolean;
+  totalTraceCount: number;
+  timings: {
+    scoring_ms: number;
+    dedup_ms: number;
+    diversity_ms: number;
+    total_ms: number;
+  };
+  top20BeforeDedup: ScoringTraceCandidateSummary[];
+  removedByDedup: ScoringTraceDedupRemoval[];
+  dedupThreshold: number;
+  dedupFallbackUsed: boolean;
+  removedByDiversity: ScoringTraceDiversityRemoval[];
+  diversityCapApplied: boolean;
+  finalSelected: ScoringTraceCandidateSummary[];
+}
+
 export interface MemoResponse {
   id: number;
   runType: MemoResponseRunType;
@@ -25,6 +73,8 @@ export interface MemoResponse {
   missing_data?: string | null;
   sections: MemoSections;
   source_refs: SourceRef[];
+  /** @nullable */
+  scoring_trace?: MemoScoringTrace | null;
   status: string;
   createdAt: Date;
 }
