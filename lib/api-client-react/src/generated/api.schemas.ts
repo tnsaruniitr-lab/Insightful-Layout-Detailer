@@ -364,12 +364,22 @@ export interface SourceRef {
   excerpt?: string | null;
 }
 
+export interface StrategyTheme {
+  name: string;
+  rationale: string;
+  playbookIds: number[];
+  antiPatternIds: number[];
+  missingData: string;
+}
+
 export interface MemoSections {
   knownPrinciples: string;
   /** @nullable */
   brandInference?: string | null;
   uncertainty: string;
   missingData: string;
+  /** @nullable — populated only for strategy_start runs */
+  themes?: StrategyTheme[] | null;
 }
 
 export type MemoResponseRunType =

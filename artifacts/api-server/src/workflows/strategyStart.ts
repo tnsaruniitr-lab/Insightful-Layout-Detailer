@@ -24,6 +24,14 @@ interface StrategyInput {
   brandId: number;
 }
 
+interface StrategyTheme {
+  name: string;
+  rationale: string;
+  playbookIds: number[];
+  antiPatternIds: number[];
+  missingData: string;
+}
+
 interface StrategyOutput {
   id: number;
   runType: "strategy_start";
@@ -36,6 +44,7 @@ interface StrategyOutput {
     brandInference: string | null;
     uncertainty: string;
     missingData: string;
+    themes: StrategyTheme[] | null;
   };
   source_refs: SourceRef[];
   status: string;
@@ -52,6 +61,7 @@ const StrategyState = Annotation.Root({
   answer: Annotation<{
     knownPrinciples: string;
     brandInference: string;
+    themes: StrategyTheme[];
     uncertainty: string;
     missingData: string;
     rationale: string;
@@ -179,17 +189,26 @@ async function generateStrategicRecommendationNode(state: StrategyStateType): Pr
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
       `You are a senior marketing strategist. Given a brand profile and the full intelligence library, generate a clear "where to start" strategy.
-Group recommendations into 3-5 named strategic themes. For each theme, identify relevant playbooks and why they fit.
-Structure your response as JSON:
+Structure your response as JSON with these exact fields:
 {
   "knownPrinciples": "The most relevant principles that define the strategic starting point — cite [P:id] inline. 2-4 sentences per domain.",
-  "brandInference": "3-5 named strategic themes with: theme name, rationale for this brand, relevant playbooks [PB:id], likely anti-patterns [AP:id] to avoid, and why this is a priority now.",
+  "brandInference": "1-2 sentence strategic summary for this brand.",
+  "themes": [
+    {
+      "name": "Theme title (e.g. Authority Building)",
+      "rationale": "Why this is a priority for this specific brand right now (2-3 sentences).",
+      "playbookIds": [list of integer playbook IDs from [PB:N] references that are most relevant],
+      "antiPatternIds": [list of integer anti-pattern IDs from [AP:N] references that apply],
+      "missingData": "What specific data would make this theme clearer or more actionable."
+    }
+  ],
   "uncertainty": "Where the strategy lacks confidence — what brand data is missing or ambiguous",
   "missingData": "Specific data that would sharpen strategy: brand positioning details, competitive intel, channel data, etc.",
   "rationale": "1-2 sentence executive summary of the recommended starting position",
-  "confidence": 0.0 to 1.0,
+  "confidence": 0.0,
   "missingDataSummary": "The single most important data gap in one sentence"
 }
+Return 3-5 themes. Use only IDs from the provided playbooks and anti-patterns lists.
 Respond ONLY with valid JSON, no markdown.`
     ),
     new HumanMessage(
@@ -208,13 +227,26 @@ Anti-Patterns to Watch:\n${apText || "None available"}`
 
   let answer: StrategyStateType["answer"] = null;
   if (jsonMatch) {
-    try { answer = JSON.parse(jsonMatch[0]); } catch { answer = null; }
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      answer = {
+        ...parsed,
+        themes: Array.isArray(parsed.themes) ? parsed.themes.map((t: { name?: unknown; rationale?: unknown; playbookIds?: unknown; antiPatternIds?: unknown; missingData?: unknown }) => ({
+          name: typeof t.name === "string" ? t.name : "Unnamed Theme",
+          rationale: typeof t.rationale === "string" ? t.rationale : "",
+          playbookIds: Array.isArray(t.playbookIds) ? t.playbookIds.filter((id: unknown) => typeof id === "number") : [],
+          antiPatternIds: Array.isArray(t.antiPatternIds) ? t.antiPatternIds.filter((id: unknown) => typeof id === "number") : [],
+          missingData: typeof t.missingData === "string" ? t.missingData : "",
+        })) : [],
+      };
+    } catch { answer = null; }
   }
 
   if (!answer) {
     answer = {
       knownPrinciples: "Strategy generated but could not be structured.",
       brandInference: text,
+      themes: [],
       uncertainty: "Response parsing failed.",
       missingData: "Unknown.",
       rationale: "See brandInference for raw analysis.",
@@ -279,6 +311,7 @@ async function persistRunNode(state: StrategyStateType): Promise<Partial<Strateg
       brandInference: answer.brandInference,
       uncertainty: answer.uncertainty,
       missingData: answer.missingData,
+      themes: answer.themes ?? null,
     },
     source_refs: sourceRefs,
     status: "done",
