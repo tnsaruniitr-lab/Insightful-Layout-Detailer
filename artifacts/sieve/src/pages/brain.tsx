@@ -69,6 +69,7 @@ function TabErrorState({ onRetry }: { onRetry: () => void }) {
 export default function BrainExplorer() {
   const [domainFilter, setDomainFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [docFilter, setDocFilter] = useState<string>("all");
   const [selected, setSelected] = useState<SelectedObject | null>(null);
 
   const commonParams = {
@@ -76,15 +77,34 @@ export default function BrainExplorer() {
     ...(statusFilter !== "all" ? { status: statusFilter as any } : {}),
   };
 
-  const { data: principles, isLoading: principlesLoading, isError: principlesError, refetch: refetchPrinciples } = useListPrinciples(commonParams as any);
-  const { data: rules, isLoading: rulesLoading, isError: rulesError, refetch: refetchRules } = useListRules(commonParams as any);
-  const { data: playbooks, isLoading: playbooksLoading, isError: playbooksError, refetch: refetchPlaybooks } = useListPlaybooks(commonParams as any);
-  const { data: antipatterns, isLoading: antiPatternsLoading, isError: antiPatternsError, refetch: refetchAntiPatterns } = useListAntiPatterns(commonParams as any);
+  const { data: principlesRaw, isLoading: principlesLoading, isError: principlesError, refetch: refetchPrinciples } = useListPrinciples(commonParams as any);
+  const { data: rulesRaw, isLoading: rulesLoading, isError: rulesError, refetch: refetchRules } = useListRules(commonParams as any);
+  const { data: playbooksRaw, isLoading: playbooksLoading, isError: playbooksError, refetch: refetchPlaybooks } = useListPlaybooks(commonParams as any);
+  const { data: antipatternsRaw, isLoading: antiPatternsLoading, isError: antiPatternsError, refetch: refetchAntiPatterns } = useListAntiPatterns(commonParams as any);
   const { data: documents } = useListDocuments({});
 
   const docMap = new Map<number, string>(
     (documents ?? []).map((d) => [d.id, d.title])
   );
+
+  const filterByDoc = <T extends { sourceRefsJson: string }>(items: T[] | undefined): T[] | undefined => {
+    if (!items || docFilter === "all") return items;
+    const id = parseInt(docFilter, 10);
+    return items.filter((item) => parseDocIds(item.sourceRefsJson).includes(id));
+  };
+
+  const principles = filterByDoc(principlesRaw);
+  const rules = filterByDoc(rulesRaw);
+  const playbooks = filterByDoc(playbooksRaw);
+  const antipatterns = filterByDoc(antipatternsRaw);
+
+  // Only list documents that produced at least one brain object
+  const docsWithObjects = new Set<number>([
+    ...(principlesRaw ?? []).flatMap((p) => parseDocIds(p.sourceRefsJson)),
+    ...(rulesRaw ?? []).flatMap((r) => parseDocIds(r.sourceRefsJson)),
+    ...(playbooksRaw ?? []).flatMap((p) => parseDocIds(p.sourceRefsJson)),
+    ...(antipatternsRaw ?? []).flatMap((ap) => parseDocIds(ap.sourceRefsJson)),
+  ]);
 
   const getConfidenceColor = (scoreStr?: string | null) => {
     if (!scoreStr) return "bg-muted text-muted-foreground";
@@ -116,9 +136,24 @@ export default function BrainExplorer() {
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Select value={docFilter} onValueChange={setDocFilter}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="All Documents" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Documents</SelectItem>
+                {(documents ?? [])
+                  .filter((d) => docsWithObjects.has(d.id))
+                  .map((d) => (
+                    <SelectItem key={d.id} value={String(d.id)}>
+                      {d.title}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
             <Select value={domainFilter} onValueChange={setDomainFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Domain" />
               </SelectTrigger>
               <SelectContent>
@@ -132,7 +167,7 @@ export default function BrainExplorer() {
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
