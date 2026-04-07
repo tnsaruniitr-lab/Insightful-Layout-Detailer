@@ -3,10 +3,6 @@ import { db, pool } from "@workspace/db";
 import {
   brandsTable,
   competitorsTable,
-  principlesTable,
-  playbooksTable,
-  rulesTable,
-  antiPatternsTable,
   mappingRunsTable,
   mappingRunSourcesTable,
   queryTracesTable,
@@ -14,6 +10,13 @@ import {
 import { eq } from "drizzle-orm";
 import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
+import {
+  type ScoredCandidate,
+  parseEmbedding,
+  buildChunkToDocMap,
+  buildFrequencyMap,
+  scoreAndSelect,
+} from "../lib/scoring";
 
 interface SourceRef {
   sourceType: "document_chunk" | "principle" | "rule" | "playbook" | "anti_pattern";
@@ -67,9 +70,7 @@ const BrandMappingState = Annotation.Root({
   input: Annotation<BrandMappingInput>(),
   brandContext: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   questionEmbedding: Annotation<number[]>({ value: (_p, n) => n, default: () => [] }),
-  retrievedPlaybooks: Annotation<Array<{ id: number; name: string; summary: string; useWhen: string | null; avoidWhen: string | null; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
-  retrievedRules: Annotation<Array<{ id: number; name: string; ifCondition: string; thenLogic: string; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
-  retrievedAntiPatterns: Annotation<Array<{ id: number; title: string; description: string; signalsJson: string; domainTag: string; riskLevel: string }>>({ value: (_p, n) => n, default: () => [] }),
+  scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
   lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   answer: Annotation<{
@@ -104,9 +105,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, label = "op"): Pr
 async function loadBrandContextNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
   if (!brand) throw new Error(`Brand ${state.input.brandId} not found`);
-
   const competitors = await db.select().from(competitorsTable).where(eq(competitorsTable.brandId, state.input.brandId));
-
   const contextParts = [
     `Brand: ${brand.name}`,
     brand.icpDescription && `ICP: ${brand.icpDescription}`,
@@ -116,93 +115,124 @@ async function loadBrandContextNode(state: BrandMappingStateType): Promise<Parti
     brand.toneDescriptorsJson && `Tone: ${brand.toneDescriptorsJson}`,
     competitors.length > 0 && `Competitors: ${competitors.map((c) => c.name).join(", ")}`,
   ].filter(Boolean);
-
   const embedModel = createEmbeddings();
   const contextText = contextParts.join("\n") + "\n" + state.input.question;
   const [embedding] = await withRetry(() => embedModel.embedDocuments([contextText]), 2, "embed_brand_context");
-
-  return {
-    brandContext: contextParts.join("\n"),
-    questionEmbedding: embedding,
-  };
+  return { brandContext: contextParts.join("\n"), questionEmbedding: embedding };
 }
 
-async function retrieveRelevantPlaybooksNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
+async function retrieveAndScoreNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
   const hasVec = state.questionEmbedding.length > 0;
   const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
-  const rows = await pool.query<{
-    id: number; name: string; summary: string; use_when: string | null;
-    avoid_when: string | null; domain_tag: string; confidence_score: string | null;
-  }>(
-    `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score
-     FROM playbooks
-     WHERE status IN ('canonical', 'candidate')
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 5`,
-    hasVec ? [vec] : []
-  );
 
-  return {
-    retrievedPlaybooks: rows.rows.map((r) => ({
-      id: r.id, name: r.name, summary: r.summary,
-      useWhen: r.use_when, avoidWhen: r.avoid_when,
-      domainTag: r.domain_tag, confidenceScore: r.confidence_score,
+  const [playbookRows, ruleRows, apRows] = await Promise.all([
+    pool.query<{
+      id: number; name: string; summary: string; use_when: string | null; avoid_when: string | null;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM playbooks
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+    pool.query<{
+      id: number; name: string; if_condition: string; then_logic: string;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM rules
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+    pool.query<{
+      id: number; title: string; description: string; signals_json: string;
+      domain_tag: string; risk_level: string; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, title, description, signals_json, domain_tag, risk_level, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM anti_patterns
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+  ]);
+
+  const candidates = [
+    ...playbookRows.rows.map((r) => ({
+      id: r.id, type: "playbook" as const, title: r.name,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { name: r.name, summary: r.summary, useWhen: r.use_when, avoidWhen: r.avoid_when, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
     })),
-  };
-}
-
-async function retrieveRelevantRulesNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
-  const hasVec = state.questionEmbedding.length > 0;
-  const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
-  const rows = await pool.query<{
-    id: number; name: string; if_condition: string; then_logic: string;
-    domain_tag: string; confidence_score: string | null;
-  }>(
-    `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score
-     FROM rules WHERE status IN ('canonical', 'candidate')
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 4`,
-    hasVec ? [vec] : []
-  );
-
-  return {
-    retrievedRules: rows.rows.map((r) => ({
-      id: r.id, name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic,
-      domainTag: r.domain_tag, confidenceScore: r.confidence_score,
+    ...ruleRows.rows.map((r) => ({
+      id: r.id, type: "rule" as const, title: r.name,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
     })),
-  };
+    ...apRows.rows.map((r) => ({
+      id: r.id, type: "anti_pattern" as const, title: r.title,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: 0.7,
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { title: r.title, description: r.description, signalsJson: r.signals_json, domainTag: r.domain_tag, riskLevel: r.risk_level },
+    })),
+  ];
+
+  const [chunkToDocMap, { map: frequencyMap, totalTraceCount }] = await Promise.all([
+    buildChunkToDocMap(candidates),
+    buildFrequencyMap(),
+  ]);
+
+  const scoredObjects = scoreAndSelect({
+    candidates,
+    chunkToDocMap,
+    frequencyMap,
+    totalTraceCount,
+    targetCount: 12,
+    queryLabel: `brand_mapping:${state.input.brandId}`,
+  });
+
+  return { scoredObjects };
 }
 
 async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
-  const hasVec = state.questionEmbedding.length > 0;
-  const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
-  const apRows = await pool.query<{ id: number; title: string; description: string; signals_json: string; domain_tag: string; risk_level: string }>(
-    `SELECT id, title, description, signals_json, domain_tag, risk_level
-     FROM anti_patterns WHERE status IN ('canonical', 'candidate')
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 3`,
-    hasVec ? [vec] : []
-  );
+  const playbooks = state.scoredObjects.filter((o) => o.type === "playbook");
+  const rules = state.scoredObjects.filter((o) => o.type === "rule");
+  const antiPatterns = state.scoredObjects.filter((o) => o.type === "anti_pattern");
 
-  const retrievedAntiPatterns = apRows.rows.map((r) => ({
-    id: r.id, title: r.title, description: r.description,
-    signalsJson: r.signals_json, domainTag: r.domain_tag, riskLevel: r.risk_level,
-  }));
+  const playbooksText = playbooks.map((p) => {
+    const d = p.data as { name: string; summary: string; useWhen: string | null; avoidWhen: string | null };
+    return `[PB:${p.id}] ${d.name}: ${d.summary}${d.useWhen ? `\n  USE WHEN: ${d.useWhen}` : ""}${d.avoidWhen ? `\n  AVOID WHEN: ${d.avoidWhen}` : ""}`;
+  }).join("\n\n");
 
-  const playbooksText = state.retrievedPlaybooks
-    .map((p) => `[PB:${p.id}] ${p.name} (${p.domainTag}): ${p.summary}${p.useWhen ? `\n  USE WHEN: ${p.useWhen}` : ""}${p.avoidWhen ? `\n  AVOID WHEN: ${p.avoidWhen}` : ""}`)
-    .join("\n\n");
+  const rulesText = rules.map((r) => {
+    const d = r.data as { name: string; ifCondition: string; thenLogic: string };
+    return `[R:${r.id}] ${d.name}: IF ${d.ifCondition} THEN ${d.thenLogic}`;
+  }).join("\n");
 
-  const rulesText = state.retrievedRules
-    .map((r) => `[R:${r.id}] ${r.name}: IF ${r.ifCondition} THEN ${r.thenLogic}`)
-    .join("\n");
-
-  const apText = retrievedAntiPatterns
-    .map((a) => `[AP:${a.id}] ${a.title} (${a.riskLevel} risk): ${a.description}`)
-    .join("\n");
+  const apText = antiPatterns.map((a) => {
+    const d = a.data as { title: string; riskLevel: string; description: string };
+    return `[AP:${a.id}] ${d.title} (${d.riskLevel} risk): ${d.description}`;
+  }).join("\n");
 
   const systemPrompt = `You are a playbook scoring system. Your job is to score how well each provided playbook fits the given brand, based strictly on the brand context and intelligence library provided. You do not have permission to draw on general marketing knowledge or introduce recommendations not grounded in the provided playbooks and rules.
 
@@ -266,13 +296,8 @@ Likely Anti-Patterns to Watch:\n${apText || "None"}`;
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      answer = {
-        ...parsed,
-        scoredPlaybooks: Array.isArray(parsed.scoredPlaybooks) ? parsed.scoredPlaybooks : [],
-      };
-    } catch {
-      answer = null;
-    }
+      answer = { ...parsed, scoredPlaybooks: Array.isArray(parsed.scoredPlaybooks) ? parsed.scoredPlaybooks : [] };
+    } catch { answer = null; }
   }
 
   if (!answer) {
@@ -284,45 +309,35 @@ Likely Anti-Patterns to Watch:\n${apText || "None"}`;
       rationale: "See brandInference for raw analysis.",
       confidence: 0.4,
       missingDataSummary: "Structured parsing failed.",
-      scoredPlaybooks: state.retrievedPlaybooks.map((p) => ({
-        playbookId: p.id,
-        name: p.name,
-        fitScore: 0.5,
-        icpFit: 0.5,
-        offerFit: 0.5,
-        geographyRelevance: 0.5,
-        funnelRelevance: 0.5,
-        categoryRelevance: 0.5,
-        strategicLeverage: 0.5,
-        reasoning: "Scoring unavailable — parsing failed.",
-        recommendedActions: [],
+      scoredPlaybooks: playbooks.map((p) => ({
+        playbookId: p.id, name: p.title, fitScore: 0.5,
+        icpFit: 0.5, offerFit: 0.5, geographyRelevance: 0.5,
+        funnelRelevance: 0.5, categoryRelevance: 0.5, strategicLeverage: 0.5,
+        reasoning: "Scoring unavailable — parsing failed.", recommendedActions: [],
       })),
     };
   }
 
-  return { answer, retrievedAntiPatterns, lastPrompt: userPrompt, lastRawResponse: text };
+  return { answer, lastPrompt: userPrompt, lastRawResponse: text };
 }
 
 async function persistRunNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
   const answer = state.answer!;
 
-  const sourceRefs: SourceRef[] = [
-    ...state.retrievedPlaybooks.map((p) => ({
-      sourceType: "playbook" as const, sourceId: p.id, title: p.name,
-      domainTag: p.domainTag, confidence: p.confidenceScore ? parseFloat(p.confidenceScore) : null,
-      excerpt: p.summary.slice(0, 200),
-    })),
-    ...state.retrievedRules.map((r) => ({
-      sourceType: "rule" as const, sourceId: r.id, title: r.name,
-      domainTag: r.domainTag, confidence: r.confidenceScore ? parseFloat(r.confidenceScore) : null,
-      excerpt: `IF ${r.ifCondition}`.slice(0, 200),
-    })),
-    ...state.retrievedAntiPatterns.map((a) => ({
-      sourceType: "anti_pattern" as const, sourceId: a.id, title: a.title,
-      domainTag: a.domainTag, confidence: null,
-      excerpt: a.description.slice(0, 200),
-    })),
-  ];
+  const sourceRefs: SourceRef[] = state.scoredObjects.map((o) => ({
+    sourceType: o.type as SourceRef["sourceType"],
+    sourceId: o.id,
+    title: o.title,
+    domainTag: (o.data as Record<string, unknown>).domainTag as string ?? null,
+    confidence: o.confidence,
+    excerpt: (() => {
+      const d = o.data as Record<string, unknown>;
+      if (o.type === "playbook") return String(d.summary ?? "").slice(0, 200);
+      if (o.type === "rule") return `IF ${d.ifCondition}`.slice(0, 200);
+      if (o.type === "anti_pattern") return String(d.description ?? "").slice(0, 200);
+      return "";
+    })(),
+  }));
 
   const [run] = await db.insert(mappingRunsTable).values({
     brandId: state.input.brandId,
@@ -336,20 +351,17 @@ async function persistRunNode(state: BrandMappingStateType): Promise<Partial<Bra
 
   if (run && sourceRefs.length > 0) {
     await db.insert(mappingRunSourcesTable).values(
-      sourceRefs.map((ref) => ({
-        mappingRunId: run.id,
-        sourceType: ref.sourceType,
-        sourceId: ref.sourceId,
-      }))
+      sourceRefs.map((ref) => ({ mappingRunId: run.id, sourceType: ref.sourceType, sourceId: ref.sourceId }))
     );
   }
 
   if (run) {
-    const retrievedObjects = [
-      ...state.retrievedPlaybooks.map((p) => ({ type: "playbook", id: p.id, title: p.name, confidence: p.confidenceScore })),
-      ...state.retrievedRules.map((r) => ({ type: "rule", id: r.id, title: r.name, confidence: r.confidenceScore })),
-      ...state.retrievedAntiPatterns.map((a) => ({ type: "anti_pattern", id: a.id, title: a.title, confidence: null })),
-    ];
+    const retrievedObjects = state.scoredObjects.map((o) => ({
+      type: o.type, id: o.id, title: o.title,
+      confidence: o.confidence,
+      finalScore: +o.finalScore.toFixed(3),
+      similarity: +o.similarity.toFixed(3),
+    }));
     await db.insert(queryTracesTable).values({
       mappingRunId: run.id,
       runType: "brand_mapping",
@@ -386,14 +398,12 @@ async function persistRunNode(state: BrandMappingStateType): Promise<Partial<Bra
 
 const workflow = new StateGraph(BrandMappingState)
   .addNode("load_brand_context", loadBrandContextNode)
-  .addNode("retrieve_relevant_playbooks", retrieveRelevantPlaybooksNode)
-  .addNode("retrieve_relevant_rules", retrieveRelevantRulesNode)
+  .addNode("retrieve_and_score", retrieveAndScoreNode)
   .addNode("score_fit_to_brand", scoreFitToBrandNode)
   .addNode("persist_run", persistRunNode)
   .addEdge(START, "load_brand_context")
-  .addEdge("load_brand_context", "retrieve_relevant_playbooks")
-  .addEdge("retrieve_relevant_playbooks", "retrieve_relevant_rules")
-  .addEdge("retrieve_relevant_rules", "score_fit_to_brand")
+  .addEdge("load_brand_context", "retrieve_and_score")
+  .addEdge("retrieve_and_score", "score_fit_to_brand")
   .addEdge("score_fit_to_brand", "persist_run")
   .addEdge("persist_run", END);
 

@@ -2,16 +2,20 @@ import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
 import { db, pool } from "@workspace/db";
 import {
   brandsTable,
-  principlesTable,
-  playbooksTable,
-  rulesTable,
   mappingRunsTable,
   mappingRunSourcesTable,
   queryTracesTable,
 } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
+import {
+  type ScoredCandidate,
+  parseEmbedding,
+  buildChunkToDocMap,
+  buildFrequencyMap,
+  scoreAndSelect,
+} from "../lib/scoring";
 
 interface SourceRef {
   sourceType: "document_chunk" | "principle" | "rule" | "playbook" | "anti_pattern";
@@ -51,10 +55,7 @@ interface QAOutput {
 const QAState = Annotation.Root({
   input: Annotation<QAInput>(),
   questionEmbedding: Annotation<number[]>({ value: (_p, n) => n, default: () => [] }),
-  retrievedPrinciples: Annotation<Array<{ id: number; title: string; statement: string; explanation: string | null; domainTag: string; confidenceScore: string | null; sourceRefsJson: string }>>({ value: (_p, n) => n, default: () => [] }),
-  retrievedPlaybooks: Annotation<Array<{ id: number; name: string; summary: string; domainTag: string; confidenceScore: string | null; sourceRefsJson: string }>>({ value: (_p, n) => n, default: () => [] }),
-  retrievedRules: Annotation<Array<{ id: number; name: string; ifCondition: string; thenLogic: string; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
-  retrievedChunks: Annotation<Array<{ id: number; chunkText: string; domainTag: string | null; documentId: number }>>({ value: (_p, n) => n, default: () => [] }),
+  scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
   brandContext: Annotation<string | null>({ value: (_p, n) => n, default: () => null }),
   lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
@@ -92,102 +93,108 @@ async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateTyp
   return { questionEmbedding: embedding };
 }
 
-async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAStateType>> {
-  const vec = `[${state.questionEmbedding.join(",")}]`;
+async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAStateType>> {
   const hasVec = state.questionEmbedding.length > 0;
+  const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
 
-  const principleParams: unknown[] = hasVec ? [vec] : [];
-  const domainClause = state.input.domainFilter
-    ? `AND domain_tag = $${principleParams.push(state.input.domainFilter)}`
-    : "";
-  const principleRows = await pool.query<{
-    id: number; title: string; statement: string; explanation: string | null;
-    domain_tag: string; confidence_score: string | null; source_refs_json: string;
-  }>(
-    `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json
-     FROM principles
-     WHERE status IN ('canonical', 'candidate')
-     ${domainClause}
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 4`,
-    principleParams
-  );
+  const domainClause = state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : "";
 
-  const playbookParams: unknown[] = hasVec ? [vec] : [];
-  const playbookDomainClause = state.input.domainFilter
-    ? `AND domain_tag = $${playbookParams.push(state.input.domainFilter)}`
-    : "";
-  const playbookRows = await pool.query<{
-    id: number; name: string; summary: string; domain_tag: string;
-    confidence_score: string | null; source_refs_json: string;
-  }>(
-    `SELECT id, name, summary, domain_tag, confidence_score, source_refs_json
-     FROM playbooks
-     WHERE status IN ('canonical', 'candidate')
-     ${playbookDomainClause}
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 4`,
-    playbookParams
-  );
+  const [principleRows, playbookRows, ruleRows] = await Promise.all([
+    pool.query<{
+      id: number; title: string; statement: string; explanation: string | null;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM principles
+       WHERE status IN ('canonical', 'candidate') ${domainClause}
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+    pool.query<{
+      id: number; name: string; summary: string; domain_tag: string;
+      confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, name, summary, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM playbooks
+       WHERE status IN ('canonical', 'candidate') ${domainClause}
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+    pool.query<{
+      id: number; name: string; if_condition: string; then_logic: string;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM rules
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+  ]);
 
-  const ruleParams: unknown[] = hasVec ? [vec] : [];
-  const ruleRows = await pool.query<{
-    id: number; name: string; if_condition: string; then_logic: string;
-    domain_tag: string; confidence_score: string | null;
-  }>(
-    `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score
-     FROM rules
-     WHERE status IN ('canonical', 'candidate')
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 4`,
-    ruleParams
-  );
+  const candidates = [
+    ...principleRows.rows.map((r) => ({
+      id: r.id, type: "principle" as const,
+      title: r.title,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { title: r.title, statement: r.statement, explanation: r.explanation, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json },
+    })),
+    ...playbookRows.rows.map((r) => ({
+      id: r.id, type: "playbook" as const,
+      title: r.name,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { name: r.name, summary: r.summary, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json },
+    })),
+    ...ruleRows.rows.map((r) => ({
+      id: r.id, type: "rule" as const,
+      title: r.name,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
+    })),
+  ];
 
-  const retrievedPrinciples = principleRows.rows.map((r) => ({
-    id: r.id, title: r.title, statement: r.statement, explanation: r.explanation,
-    domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json,
-  }));
+  const [chunkToDocMap, { map: frequencyMap, totalTraceCount }] = await Promise.all([
+    buildChunkToDocMap(candidates),
+    buildFrequencyMap(),
+  ]);
 
-  const retrievedPlaybooks = playbookRows.rows.map((r) => ({
-    id: r.id, name: r.name, summary: r.summary,
-    domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json,
-  }));
+  const scoredObjects = scoreAndSelect({
+    candidates,
+    chunkToDocMap,
+    frequencyMap,
+    totalTraceCount,
+    targetCount: 12,
+    queryLabel: `qa:${state.input.question.slice(0, 40)}`,
+  });
 
-  const retrievedRules = ruleRows.rows.map((r) => ({
-    id: r.id, name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic,
-    domainTag: r.domain_tag, confidenceScore: r.confidence_score,
-  }));
-
-  return { retrievedPrinciples, retrievedPlaybooks, retrievedRules };
-}
-
-async function retrieveSupportingChunksNode(state: QAStateType): Promise<Partial<QAStateType>> {
-  if (state.questionEmbedding.length === 0) return { retrievedChunks: [] };
-
-  const vec = `[${state.questionEmbedding.join(",")}]`;
-  const rows = await pool.query<{ id: number; chunk_text: string; domain_tag: string | null; document_id: number }>(
-    `SELECT id, chunk_text, domain_tag, document_id
-     FROM document_chunks
-     WHERE embedding_vector IS NOT NULL
-     ORDER BY embedding_vector <=> $1::vector
-     LIMIT 5`,
-    [vec]
-  );
-  const retrievedChunks = rows.rows.map((r) => ({
-    id: r.id, chunkText: r.chunk_text, domainTag: r.domain_tag, documentId: r.document_id,
-  }));
-  return { retrievedChunks };
+  return { scoredObjects };
 }
 
 async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAStateType>> {
   if (!state.input.brandId || !state.input.useBrandContext) return { brandContext: null };
-
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
   if (!brand) return { brandContext: null };
-
   const context = [
     brand.name && `Brand: ${brand.name}`,
     brand.icpDescription && `ICP: ${brand.icpDescription}`,
@@ -195,22 +202,28 @@ async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAState
     brand.targetGeographiesJson && `Geographies: ${brand.targetGeographiesJson}`,
     brand.productTruthsJson && `Product truths: ${brand.productTruthsJson}`,
   ].filter(Boolean).join("\n");
-
   return { brandContext: context };
 }
 
 async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAStateType>> {
-  const principlesContext = state.retrievedPrinciples
-    .map((p) => `• [P:${p.id}] ${p.title}: ${p.statement}${p.explanation ? ` — ${p.explanation}` : ""}`)
-    .join("\n");
+  const principles = state.scoredObjects.filter((o) => o.type === "principle");
+  const playbooks = state.scoredObjects.filter((o) => o.type === "playbook");
+  const rules = state.scoredObjects.filter((o) => o.type === "rule");
 
-  const playbooksContext = state.retrievedPlaybooks
-    .map((p) => `• [PB:${p.id}] ${p.name}: ${p.summary}`)
-    .join("\n");
+  const principlesContext = principles.map((p) => {
+    const d = p.data as { title: string; statement: string; explanation: string | null };
+    return `• [P:${p.id}] ${d.title}: ${d.statement}${d.explanation ? ` — ${d.explanation}` : ""}`;
+  }).join("\n");
 
-  const rulesContext = state.retrievedRules
-    .map((r) => `• [R:${r.id}] ${r.name}: IF ${r.ifCondition} THEN ${r.thenLogic}`)
-    .join("\n");
+  const playbooksContext = playbooks.map((p) => {
+    const d = p.data as { name: string; summary: string };
+    return `• [PB:${p.id}] ${d.name}: ${d.summary}`;
+  }).join("\n");
+
+  const rulesContext = rules.map((r) => {
+    const d = r.data as { name: string; ifCondition: string; thenLogic: string };
+    return `• [R:${r.id}] ${d.name}: IF ${d.ifCondition} THEN ${d.thenLogic}`;
+  }).join("\n");
 
   const brandSection = state.brandContext ? `\nBrand Context:\n${state.brandContext}` : "";
 
@@ -252,9 +265,9 @@ ${rulesContext || "None"}`;
     userPrompt,
     2
   );
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
 
   const traceState = { lastPrompt: userPrompt, lastRawResponse: text };
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
 
   if (!jsonMatch) {
     return {
@@ -273,26 +286,17 @@ ${rulesContext || "None"}`;
 
   try {
     const parsed = JSON.parse(jsonMatch[0]) as {
-      knownPrinciples: string;
-      brandInference: string | null;
-      uncertainty: string;
-      missingData: string;
-      rationale: string;
-      confidence: number;
-      missingDataSummary: string;
+      knownPrinciples: string; brandInference: string | null; uncertainty: string;
+      missingData: string; rationale: string; confidence: number; missingDataSummary: string;
     };
     return { ...traceState, answer: parsed };
   } catch {
     return {
       ...traceState,
       answer: {
-        knownPrinciples: text,
-        brandInference: null,
-        uncertainty: "Parse error.",
-        missingData: "Unknown.",
-        rationale: "Could not parse structured answer.",
-        confidence: 0.3,
-        missingDataSummary: "Parse error.",
+        knownPrinciples: text, brandInference: null, uncertainty: "Parse error.",
+        missingData: "Unknown.", rationale: "Could not parse structured answer.",
+        confidence: 0.3, missingDataSummary: "Parse error.",
       },
     };
   }
@@ -301,32 +305,20 @@ ${rulesContext || "None"}`;
 async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>> {
   const answer = state.answer!;
 
-  const sourceRefs: SourceRef[] = [
-    ...state.retrievedPrinciples.map((p) => ({
-      sourceType: "principle" as const,
-      sourceId: p.id,
-      title: p.title,
-      domainTag: p.domainTag,
-      confidence: p.confidenceScore ? parseFloat(p.confidenceScore) : null,
-      excerpt: p.statement.slice(0, 200),
-    })),
-    ...state.retrievedPlaybooks.map((p) => ({
-      sourceType: "playbook" as const,
-      sourceId: p.id,
-      title: p.name,
-      domainTag: p.domainTag,
-      confidence: p.confidenceScore ? parseFloat(p.confidenceScore) : null,
-      excerpt: p.summary.slice(0, 200),
-    })),
-    ...state.retrievedRules.map((r) => ({
-      sourceType: "rule" as const,
-      sourceId: r.id,
-      title: r.name,
-      domainTag: r.domainTag,
-      confidence: r.confidenceScore ? parseFloat(r.confidenceScore) : null,
-      excerpt: `IF ${r.ifCondition} THEN ${r.thenLogic}`.slice(0, 200),
-    })),
-  ];
+  const sourceRefs: SourceRef[] = state.scoredObjects.map((o) => ({
+    sourceType: o.type === "anti_pattern" ? "anti_pattern" : o.type as SourceRef["sourceType"],
+    sourceId: o.id,
+    title: o.title,
+    domainTag: (o.data as Record<string, unknown>).domainTag as string ?? null,
+    confidence: o.confidence,
+    excerpt: (() => {
+      const d = o.data as Record<string, unknown>;
+      if (o.type === "principle") return String(d.statement ?? "").slice(0, 200);
+      if (o.type === "playbook") return String(d.summary ?? "").slice(0, 200);
+      if (o.type === "rule") return `IF ${d.ifCondition} THEN ${d.thenLogic}`.slice(0, 200);
+      return "";
+    })(),
+  }));
 
   const [run] = await db.insert(mappingRunsTable).values({
     brandId: state.input.brandId ?? null,
@@ -339,21 +331,18 @@ async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>>
   }).returning();
 
   if (run && sourceRefs.length > 0) {
-    const runSourceValues = sourceRefs.map((ref) => ({
-      mappingRunId: run.id,
-      sourceType: ref.sourceType,
-      sourceId: ref.sourceId,
-    }));
-    await db.insert(mappingRunSourcesTable).values(runSourceValues);
+    await db.insert(mappingRunSourcesTable).values(
+      sourceRefs.map((ref) => ({ mappingRunId: run.id, sourceType: ref.sourceType, sourceId: ref.sourceId }))
+    );
   }
 
   if (run) {
-    const retrievedObjects = [
-      ...state.retrievedPrinciples.map((p) => ({ type: "principle", id: p.id, title: p.title, confidence: p.confidenceScore })),
-      ...state.retrievedPlaybooks.map((p) => ({ type: "playbook", id: p.id, title: p.name, confidence: p.confidenceScore })),
-      ...state.retrievedRules.map((r) => ({ type: "rule", id: r.id, title: r.name, confidence: r.confidenceScore })),
-      ...state.retrievedChunks.map((c) => ({ type: "chunk", id: c.id, title: `Chunk ${c.id}`, confidence: null })),
-    ];
+    const retrievedObjects = state.scoredObjects.map((o) => ({
+      type: o.type, id: o.id, title: o.title,
+      confidence: o.confidence,
+      finalScore: +o.finalScore.toFixed(3),
+      similarity: +o.similarity.toFixed(3),
+    }));
     await db.insert(queryTracesTable).values({
       mappingRunId: run.id,
       runType: "knowledge_answer",
@@ -389,15 +378,13 @@ async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>>
 
 const workflow = new StateGraph(QAState)
   .addNode("parse_question", parseQuestionNode)
-  .addNode("retrieve_brain_objects", retrieveBrainObjectsNode)
-  .addNode("retrieve_supporting_chunks", retrieveSupportingChunksNode)
+  .addNode("retrieve_and_score", retrieveAndScoreNode)
   .addNode("load_brand_context", loadBrandContextNode)
   .addNode("synthesize_answer", synthesizeAnswerNode)
   .addNode("persist_run", persistRunNode)
   .addEdge(START, "parse_question")
-  .addEdge("parse_question", "retrieve_brain_objects")
-  .addEdge("retrieve_brain_objects", "retrieve_supporting_chunks")
-  .addEdge("retrieve_supporting_chunks", "load_brand_context")
+  .addEdge("parse_question", "retrieve_and_score")
+  .addEdge("retrieve_and_score", "load_brand_context")
   .addEdge("load_brand_context", "synthesize_answer")
   .addEdge("synthesize_answer", "persist_run")
   .addEdge("persist_run", END);

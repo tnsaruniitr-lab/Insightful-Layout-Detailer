@@ -10,6 +10,13 @@ import {
 import { eq } from "drizzle-orm";
 import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
+import {
+  type ScoredCandidate,
+  parseEmbedding,
+  buildChunkToDocMap,
+  buildFrequencyMap,
+  scoreAndSelect,
+} from "../lib/scoring";
 
 interface SourceRef {
   sourceType: "document_chunk" | "principle" | "rule" | "playbook" | "anti_pattern";
@@ -56,9 +63,7 @@ const StrategyState = Annotation.Root({
   input: Annotation<StrategyInput>(),
   brandContext: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   brandEmbedding: Annotation<number[]>({ value: (_p, n) => n, default: () => [] }),
-  retrievedPlaybooks: Annotation<Array<{ id: number; name: string; summary: string; useWhen: string | null; expectedOutcomes: string | null; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
-  retrievedPrinciples: Annotation<Array<{ id: number; title: string; statement: string; explanation: string | null; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
-  retrievedAntiPatterns: Annotation<Array<{ id: number; title: string; description: string; domainTag: string; riskLevel: string }>>({ value: (_p, n) => n, default: () => [] }),
+  scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
   lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   answer: Annotation<{
@@ -93,9 +98,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, label = "op"): Pr
 async function loadBrandContextNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
   if (!brand) throw new Error(`Brand ${state.input.brandId} not found`);
-
   const competitors = await db.select().from(competitorsTable).where(eq(competitorsTable.brandId, state.input.brandId));
-
   const contextParts = [
     `Brand: ${brand.name}`,
     brand.icpDescription && `ICP: ${brand.icpDescription}`,
@@ -105,87 +108,123 @@ async function loadBrandContextNode(state: StrategyStateType): Promise<Partial<S
     brand.toneDescriptorsJson && `Tone: ${brand.toneDescriptorsJson}`,
     competitors.length > 0 && `Competitors: ${competitors.map((c) => c.name).join(", ")}`,
   ].filter(Boolean);
-
   const brandContext = contextParts.join("\n");
   const embedModel = createEmbeddings();
   const [embedding] = await withRetry(() => embedModel.embedDocuments([brandContext]), 2, "embed_brand_strategy");
-
   return { brandContext, brandEmbedding: embedding };
 }
 
-async function retrieveRelevantPlaybooksNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
+async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
   const hasVec = state.brandEmbedding.length > 0;
   const vec = hasVec ? `[${state.brandEmbedding.join(",")}]` : null;
-  const rows = await pool.query<{
-    id: number; name: string; summary: string; use_when: string | null;
-    expected_outcomes: string | null; domain_tag: string; confidence_score: string | null;
-  }>(
-    `SELECT id, name, summary, use_when, expected_outcomes, domain_tag, confidence_score
-     FROM playbooks WHERE status IN ('canonical', 'candidate')
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 5`,
-    hasVec ? [vec] : []
-  );
 
-  return {
-    retrievedPlaybooks: rows.rows.map((r) => ({
-      id: r.id, name: r.name, summary: r.summary,
-      useWhen: r.use_when, expectedOutcomes: r.expected_outcomes,
-      domainTag: r.domain_tag, confidenceScore: r.confidence_score,
+  const [playbookRows, principleRows, apRows] = await Promise.all([
+    pool.query<{
+      id: number; name: string; summary: string; use_when: string | null; expected_outcomes: string | null;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, name, summary, use_when, expected_outcomes, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM playbooks
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+    pool.query<{
+      id: number; title: string; statement: string; explanation: string | null;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM principles
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+    pool.query<{
+      id: number; title: string; description: string; domain_tag: string; risk_level: string;
+      source_refs_json: string; status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, title, description, domain_tag, risk_level, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM anti_patterns
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
+  ]);
+
+  const candidates = [
+    ...playbookRows.rows.map((r) => ({
+      id: r.id, type: "playbook" as const, title: r.name,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { name: r.name, summary: r.summary, useWhen: r.use_when, expectedOutcomes: r.expected_outcomes, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
     })),
-  };
-}
-
-async function retrieveRelevantPrinciplesNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
-  const hasVec = state.brandEmbedding.length > 0;
-  const vec = hasVec ? `[${state.brandEmbedding.join(",")}]` : null;
-  const rows = await pool.query<{
-    id: number; title: string; statement: string; explanation: string | null;
-    domain_tag: string; confidence_score: string | null;
-  }>(
-    `SELECT id, title, statement, explanation, domain_tag, confidence_score
-     FROM principles WHERE status IN ('canonical', 'candidate')
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 4`,
-    hasVec ? [vec] : []
-  );
-
-  return {
-    retrievedPrinciples: rows.rows.map((r) => ({
-      id: r.id, title: r.title, statement: r.statement, explanation: r.explanation,
-      domainTag: r.domain_tag, confidenceScore: r.confidence_score,
+    ...principleRows.rows.map((r) => ({
+      id: r.id, type: "principle" as const, title: r.title,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { title: r.title, statement: r.statement, explanation: r.explanation, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
     })),
-  };
+    ...apRows.rows.map((r) => ({
+      id: r.id, type: "anti_pattern" as const, title: r.title,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: 0.7,
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { title: r.title, description: r.description, domainTag: r.domain_tag, riskLevel: r.risk_level },
+    })),
+  ];
+
+  const [chunkToDocMap, { map: frequencyMap, totalTraceCount }] = await Promise.all([
+    buildChunkToDocMap(candidates),
+    buildFrequencyMap(),
+  ]);
+
+  const scoredObjects = scoreAndSelect({
+    candidates,
+    chunkToDocMap,
+    frequencyMap,
+    totalTraceCount,
+    targetCount: 12,
+    queryLabel: `strategy:${state.input.brandId}`,
+  });
+
+  return { scoredObjects };
 }
 
 async function generateStrategicRecommendationNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
-  const hasVecAp = state.brandEmbedding.length > 0;
-  const vecAp = hasVecAp ? `[${state.brandEmbedding.join(",")}]` : null;
-  const apRows = await pool.query<{ id: number; title: string; description: string; domain_tag: string; risk_level: string }>(
-    `SELECT id, title, description, domain_tag, risk_level
-     FROM anti_patterns WHERE status IN ('canonical', 'candidate')
-     ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${hasVecAp ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 3`,
-    hasVecAp ? [vecAp] : []
-  );
-  const retrievedAntiPatterns = apRows.rows.map((r) => ({
-    id: r.id, title: r.title, description: r.description, domainTag: r.domain_tag, riskLevel: r.risk_level,
-  }));
+  const principles = state.scoredObjects.filter((o) => o.type === "principle");
+  const playbooks = state.scoredObjects.filter((o) => o.type === "playbook");
+  const antiPatterns = state.scoredObjects.filter((o) => o.type === "anti_pattern");
 
-  const principlesText = state.retrievedPrinciples
-    .map((p) => `[P:${p.id}] ${p.title} (${p.domainTag}): ${p.statement}`)
-    .join("\n");
+  const principlesText = principles.map((p) => {
+    const d = p.data as { title: string; statement: string; domainTag: string };
+    return `[P:${p.id}] ${d.title} (${d.domainTag}): ${d.statement}`;
+  }).join("\n");
 
-  const playbooksText = state.retrievedPlaybooks
-    .map((p) => `[PB:${p.id}] ${p.name} (${p.domainTag}): ${p.summary}${p.useWhen ? ` | USE WHEN: ${p.useWhen}` : ""}${p.expectedOutcomes ? ` | OUTCOMES: ${p.expectedOutcomes}` : ""}`)
-    .join("\n");
+  const playbooksText = playbooks.map((p) => {
+    const d = p.data as { name: string; summary: string; useWhen: string | null; expectedOutcomes: string | null; domainTag: string };
+    return `[PB:${p.id}] ${d.name} (${d.domainTag}): ${d.summary}${d.useWhen ? ` | USE WHEN: ${d.useWhen}` : ""}${d.expectedOutcomes ? ` | OUTCOMES: ${d.expectedOutcomes}` : ""}`;
+  }).join("\n");
 
-  const apText = retrievedAntiPatterns
-    .map((a) => `[AP:${a.id}] ${a.title} (${a.riskLevel} risk, ${a.domainTag}): ${a.description}`)
-    .join("\n");
+  const apText = antiPatterns.map((a) => {
+    const d = a.data as { title: string; riskLevel: string; domainTag: string; description: string };
+    return `[AP:${a.id}] ${d.title} (${d.riskLevel} risk, ${d.domainTag}): ${d.description}`;
+  }).join("\n");
 
   const systemPrompt = `You are a strategy synthesis system. Your job is to map a brand profile against the provided intelligence library — principles, playbooks, and anti-patterns — and produce a grounded "where to start" strategy. You must work exclusively from what is provided. You do not have permission to introduce general marketing strategy, industry best practices, or any knowledge from outside the provided context.
 
@@ -203,7 +242,7 @@ Structure your response as JSON with these exact fields:
   "brandInference": "What the provided intelligence conclusively supports as this brand's strategic position — every claim must cite [P:id] or [PB:id].",
   "themes": [
     {
-      "name": "Theme title drawn from the intelligence library (e.g. Authority Building)",
+      "name": "Theme title drawn from the intelligence library",
       "rationale": "Why this theme is a priority — grounded in cited principles and playbooks, not general advice (2-3 sentences with citations).",
       "playbookIds": [integer IDs only from the provided playbook list],
       "antiPatternIds": [integer IDs only from the provided anti-pattern list],
@@ -265,29 +304,26 @@ Anti-Patterns to Watch:\n${apText || "None available"}`;
     };
   }
 
-  return { answer, retrievedAntiPatterns, lastPrompt: userPrompt, lastRawResponse: text };
+  return { answer, lastPrompt: userPrompt, lastRawResponse: text };
 }
 
 async function persistRunNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
   const answer = state.answer!;
 
-  const sourceRefs: SourceRef[] = [
-    ...state.retrievedPrinciples.map((p) => ({
-      sourceType: "principle" as const, sourceId: p.id, title: p.title,
-      domainTag: p.domainTag, confidence: p.confidenceScore ? parseFloat(p.confidenceScore) : null,
-      excerpt: p.statement.slice(0, 200),
-    })),
-    ...state.retrievedPlaybooks.map((p) => ({
-      sourceType: "playbook" as const, sourceId: p.id, title: p.name,
-      domainTag: p.domainTag, confidence: p.confidenceScore ? parseFloat(p.confidenceScore) : null,
-      excerpt: p.summary.slice(0, 200),
-    })),
-    ...state.retrievedAntiPatterns.map((a) => ({
-      sourceType: "anti_pattern" as const, sourceId: a.id, title: a.title,
-      domainTag: a.domainTag, confidence: null,
-      excerpt: a.description.slice(0, 200),
-    })),
-  ];
+  const sourceRefs: SourceRef[] = state.scoredObjects.map((o) => ({
+    sourceType: o.type as SourceRef["sourceType"],
+    sourceId: o.id,
+    title: o.title,
+    domainTag: (o.data as Record<string, unknown>).domainTag as string ?? null,
+    confidence: o.confidence,
+    excerpt: (() => {
+      const d = o.data as Record<string, unknown>;
+      if (o.type === "principle") return String(d.statement ?? "").slice(0, 200);
+      if (o.type === "playbook") return String(d.summary ?? "").slice(0, 200);
+      if (o.type === "anti_pattern") return String(d.description ?? "").slice(0, 200);
+      return "";
+    })(),
+  }));
 
   const [run] = await db.insert(mappingRunsTable).values({
     brandId: state.input.brandId,
@@ -301,20 +337,17 @@ async function persistRunNode(state: StrategyStateType): Promise<Partial<Strateg
 
   if (run && sourceRefs.length > 0) {
     await db.insert(mappingRunSourcesTable).values(
-      sourceRefs.map((ref) => ({
-        mappingRunId: run.id,
-        sourceType: ref.sourceType,
-        sourceId: ref.sourceId,
-      }))
+      sourceRefs.map((ref) => ({ mappingRunId: run.id, sourceType: ref.sourceType, sourceId: ref.sourceId }))
     );
   }
 
   if (run) {
-    const retrievedObjects = [
-      ...state.retrievedPrinciples.map((p) => ({ type: "principle", id: p.id, title: p.title, confidence: p.confidenceScore })),
-      ...state.retrievedPlaybooks.map((p) => ({ type: "playbook", id: p.id, title: p.name, confidence: p.confidenceScore })),
-      ...state.retrievedAntiPatterns.map((a) => ({ type: "anti_pattern", id: a.id, title: a.title, confidence: null })),
-    ];
+    const retrievedObjects = state.scoredObjects.map((o) => ({
+      type: o.type, id: o.id, title: o.title,
+      confidence: o.confidence,
+      finalScore: +o.finalScore.toFixed(3),
+      similarity: +o.similarity.toFixed(3),
+    }));
     await db.insert(queryTracesTable).values({
       mappingRunId: run.id,
       runType: "strategy_start",
@@ -351,14 +384,12 @@ async function persistRunNode(state: StrategyStateType): Promise<Partial<Strateg
 
 const workflow = new StateGraph(StrategyState)
   .addNode("load_brand_context", loadBrandContextNode)
-  .addNode("retrieve_relevant_playbooks", retrieveRelevantPlaybooksNode)
-  .addNode("retrieve_relevant_principles", retrieveRelevantPrinciplesNode)
+  .addNode("retrieve_and_score", retrieveAndScoreNode)
   .addNode("generate_starting_recommendation", generateStrategicRecommendationNode)
   .addNode("persist_run", persistRunNode)
   .addEdge(START, "load_brand_context")
-  .addEdge("load_brand_context", "retrieve_relevant_playbooks")
-  .addEdge("retrieve_relevant_playbooks", "retrieve_relevant_principles")
-  .addEdge("retrieve_relevant_principles", "generate_starting_recommendation")
+  .addEdge("load_brand_context", "retrieve_and_score")
+  .addEdge("retrieve_and_score", "generate_starting_recommendation")
   .addEdge("generate_starting_recommendation", "persist_run")
   .addEdge("persist_run", END);
 
