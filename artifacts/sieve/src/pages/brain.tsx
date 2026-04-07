@@ -5,6 +5,7 @@ import {
   useListRules,
   useListPlaybooks,
   useListAntiPatterns,
+  useListDocuments,
   Principle,
   Rule,
   AntiPattern,
@@ -15,8 +16,35 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BrainCircuit, BookOpen, ShieldAlert, CheckCircle, Info, AlertCircle, RefreshCw } from "lucide-react";
+import { BrainCircuit, BookOpen, ShieldAlert, CheckCircle, Info, AlertCircle, RefreshCw, FileText } from "lucide-react";
 import { BrainObjectDetail } from "@/components/brain-object-detail";
+
+function parseDocIds(json: string): number[] {
+  try {
+    const v = JSON.parse(json);
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is number => typeof x === "number");
+  } catch { return []; }
+}
+
+function SourceTags({ sourceRefsJson, docMap }: { sourceRefsJson: string; docMap: Map<number, string> }) {
+  const ids = parseDocIds(sourceRefsJson);
+  if (ids.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 pt-2 border-t mt-2">
+      {ids.map((id) => (
+        <span
+          key={id}
+          className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground border truncate max-w-[180px]"
+          title={docMap.get(id) ?? `Document #${id}`}
+        >
+          <FileText className="h-2.5 w-2.5 shrink-0" />
+          <span className="truncate">{docMap.get(id) ?? `Doc #${id}`}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 type BrainObjectType = "principle" | "rule" | "playbook" | "anti_pattern";
 
@@ -52,6 +80,11 @@ export default function BrainExplorer() {
   const { data: rules, isLoading: rulesLoading, isError: rulesError, refetch: refetchRules } = useListRules(commonParams as any);
   const { data: playbooks, isLoading: playbooksLoading, isError: playbooksError, refetch: refetchPlaybooks } = useListPlaybooks(commonParams as any);
   const { data: antipatterns, isLoading: antiPatternsLoading, isError: antiPatternsError, refetch: refetchAntiPatterns } = useListAntiPatterns(commonParams as any);
+  const { data: documents } = useListDocuments({});
+
+  const docMap = new Map<number, string>(
+    (documents ?? []).map((d) => [d.id, d.title])
+  );
 
   const getConfidenceColor = (scoreStr?: string | null) => {
     if (!scoreStr) return "bg-muted text-muted-foreground";
@@ -153,7 +186,8 @@ export default function BrainExplorer() {
                       <CardTitle className="text-base font-semibold leading-tight">{p.title}</CardTitle>
                     </CardHeader>
                     <CardContent className="flex-1 text-sm text-muted-foreground">
-                      <p className="line-clamp-4">{p.statement}</p>
+                      <p className="line-clamp-3">{p.statement}</p>
+                      <SourceTags sourceRefsJson={p.sourceRefsJson} docMap={docMap} />
                     </CardContent>
                   </Card>
                 ))}
@@ -198,6 +232,7 @@ export default function BrainExplorer() {
                         <span className="font-bold text-foreground text-xs uppercase block mb-1">THEN</span>
                         {r.thenLogic}
                       </div>
+                      <SourceTags sourceRefsJson={r.sourceRefsJson} docMap={docMap} />
                     </CardContent>
                   </Card>
                 ))}
@@ -248,6 +283,7 @@ export default function BrainExplorer() {
                           </div>
                         )}
                       </div>
+                      <SourceTags sourceRefsJson={p.sourceRefsJson} docMap={docMap} />
                     </CardContent>
                   </Card>
                 ))}
@@ -282,7 +318,7 @@ export default function BrainExplorer() {
                       </div>
                       <CardTitle className="text-base font-semibold leading-tight text-destructive">{ap.title}</CardTitle>
                     </CardHeader>
-                    <CardContent className="flex-1 text-sm text-muted-foreground pt-4 space-y-4">
+                    <CardContent className="flex-1 text-sm text-muted-foreground pt-4 space-y-3">
                       <p className="line-clamp-3">{ap.description}</p>
                       <div className="bg-muted p-2 rounded text-xs">
                         <span className="font-semibold block mb-1 text-foreground flex items-center gap-1">
@@ -290,6 +326,7 @@ export default function BrainExplorer() {
                         </span>
                         <span className="line-clamp-2">{ap.signalsJson}</span>
                       </div>
+                      <SourceTags sourceRefsJson={ap.sourceRefsJson} docMap={docMap} />
                     </CardContent>
                   </Card>
                 ))}
