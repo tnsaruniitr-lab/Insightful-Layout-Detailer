@@ -224,8 +224,24 @@ export default function KnowledgeHub() {
               </DialogHeader>
               <form onSubmit={handleUpload} className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label htmlFor="file">File (PDF, TXT, MD)</Label>
-                  <Input id="file" type="file" accept=".pdf,.txt,.md,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} required />
+                  <Label htmlFor="file">File (PDF, TXT, MD, DOC)</Label>
+                  <Input
+                    id="file"
+                    type="file"
+                    accept=".pdf,.txt,.md,.doc,.docx"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      setFile(f);
+                      if (f) {
+                        const ext = f.name.split(".").pop()?.toLowerCase();
+                        if (ext === "pdf") setSourceType(UploadDocumentFormSourceType.pdf);
+                        else if (ext === "md") setSourceType(UploadDocumentFormSourceType.markdown);
+                        else if (ext === "doc" || ext === "docx") setSourceType(UploadDocumentFormSourceType.doc);
+                        else setSourceType(UploadDocumentFormSourceType.text);
+                      }
+                    }}
+                    required
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="title">Document Title</Label>
@@ -244,16 +260,27 @@ export default function KnowledgeHub() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Trust Level</Label>
-                    <Select value={trustLevel} onValueChange={(v) => setTrustLevel(v as UploadDocumentFormTrustLevel)}>
+                    <Label>Source Type</Label>
+                    <Select value={sourceType} onValueChange={(v) => setSourceType(v as UploadDocumentFormSourceType)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {Object.values(UploadDocumentFormTrustLevel).map((level) => (
-                          <SelectItem key={level} value={level}>{level}</SelectItem>
+                        {Object.values(UploadDocumentFormSourceType).map((t) => (
+                          <SelectItem key={t} value={t}>{t.replace("_", " ").toUpperCase()}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Trust Level</Label>
+                  <Select value={trustLevel} onValueChange={(v) => setTrustLevel(v as UploadDocumentFormTrustLevel)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.values(UploadDocumentFormTrustLevel).map((level) => (
+                        <SelectItem key={level} value={level}>{level}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <DialogFooter>
                   <Button type="submit" disabled={!file || !title || uploadDoc.isPending || processDoc.isPending}>
