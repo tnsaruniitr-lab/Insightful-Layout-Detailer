@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, Save, X, PlusCircle } from "lucide-react";
+import { Trash2, Plus, Save, X, PlusCircle, Pencil } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -62,6 +62,60 @@ function TagInput({
         </div>
       )}
     </div>
+  );
+}
+
+function EditCompetitorDialog({ open, onClose, competitor, brandId, onSaved }: {
+  open: boolean; onClose: () => void;
+  competitor: { id: number; name: string; notes?: string | null };
+  brandId: number;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const deleteCompetitor = useDeleteCompetitor();
+  const createCompetitor = useCreateCompetitor();
+  const [name, setName] = useState(competitor.name);
+  const [notes, setNotes] = useState(competitor.notes ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setName(competitor.name); setNotes(competitor.notes ?? ""); }, [competitor]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      await deleteCompetitor.mutateAsync({ id: brandId, competitorId: competitor.id });
+      await createCompetitor.mutateAsync({ id: brandId, data: { name: name.trim(), notes: notes || undefined } });
+      toast({ title: "Competitor updated" });
+      onSaved();
+    } catch {
+      toast({ title: "Failed to update competitor", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={() => onClose()}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit Competitor</DialogTitle></DialogHeader>
+        <form onSubmit={handleSave} className="space-y-4 pt-2">
+          <div className="space-y-2">
+            <Label>Competitor Name *</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} required />
+          </div>
+          <div className="space-y-2">
+            <Label>Notes / Positioning</Label>
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Price leader..." />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={!name.trim() || saving}>{saving ? "Saving..." : "Save Changes"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -146,6 +200,7 @@ export default function BrandProfile() {
 
   const [newCompName, setNewCompName] = useState("");
   const [newCompNotes, setNewCompNotes] = useState("");
+  const [editingCompetitor, setEditingCompetitor] = useState<{ id: number; name: string; notes?: string | null } | null>(null);
 
   useEffect(() => {
     if (brand) {
@@ -335,9 +390,14 @@ export default function BrandProfile() {
                       <div className="font-semibold text-sm">{c.name}</div>
                       {c.notes && <div className="text-xs text-muted-foreground mt-1">{c.notes}</div>}
                     </div>
-                    <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDeleteCompetitor(c.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" onClick={() => setEditingCompetitor(c)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDeleteCompetitor(c.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 ))
               ) : (
@@ -354,6 +414,19 @@ export default function BrandProfile() {
           onClose={() => setShowCreate(false)}
           onCreated={(id) => { setActiveBrandId(id); setShowCreate(false); }}
         />
+
+        {editingCompetitor && activeBrandId && (
+          <EditCompetitorDialog
+            open={!!editingCompetitor}
+            onClose={() => setEditingCompetitor(null)}
+            competitor={editingCompetitor}
+            brandId={activeBrandId}
+            onSaved={() => {
+              setEditingCompetitor(null);
+              queryClient.invalidateQueries({ queryKey: ["brands", activeBrandId, "competitors"] });
+            }}
+          />
+        )}
       </div>
     </Layout>
   );

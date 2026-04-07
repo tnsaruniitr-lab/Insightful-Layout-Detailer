@@ -184,33 +184,75 @@ function PlaybookDetailDialog({
   );
 }
 
-function ObjectCard({ title, meta, body, refs, statusBadge, onClick }: {
+function ObjectCard({ title, meta, body, refs, statusBadge, onClick, onNavigate }: {
   title: string;
   meta: React.ReactNode;
   body: string;
   refs?: string | null;
   statusBadge: React.ReactNode;
   onClick?: () => void;
+  onNavigate?: (tab: string) => void;
 }) {
-  const sourceCount = parseSourceRefs(refs).length;
+  const [showRefs, setShowRefs] = useState(false);
+  const sourceRefs = parseSourceRefs(refs);
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("[data-refs-toggle]")) return;
+    onClick?.();
+  };
+
   return (
     <Card
-      className="flex flex-col cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
-      onClick={onClick}
+      className="flex flex-col hover:border-primary/40 hover:shadow-md transition-all"
+      onClick={handleCardClick}
     >
       <CardHeader className="pb-3">
         <div className="flex justify-between items-start gap-2 mb-2">
           {meta}
           {statusBadge}
         </div>
-        <CardTitle className="text-base font-serif font-bold leading-tight">{title}</CardTitle>
+        <CardTitle className={`text-base font-serif font-bold leading-tight ${onClick ? "cursor-pointer" : ""}`}>{title}</CardTitle>
         <CardDescription className="line-clamp-2 text-xs mt-1">{body}</CardDescription>
       </CardHeader>
-      <CardContent className="mt-auto pt-0">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{sourceCount} source ref{sourceCount !== 1 ? "s" : ""}</span>
-          {onClick && <ChevronRight className="h-3.5 w-3.5 opacity-50" />}
-        </div>
+      <CardContent className="mt-auto pt-0 space-y-2">
+        {sourceRefs.length > 0 ? (
+          <div data-refs-toggle>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowRefs((v) => !v); }}
+              className="flex items-center gap-1.5 text-xs text-primary hover:underline cursor-pointer"
+            >
+              {showRefs ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              {sourceRefs.length} source ref{sourceRefs.length !== 1 ? "s" : ""}
+            </button>
+            {showRefs && (
+              <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+                {sourceRefs.map((ref, idx) => {
+                  const tab = sourceTypeToTab(ref.sourceType);
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => onNavigate?.(tab)}
+                      className="w-full flex items-center gap-2 p-2 rounded text-xs bg-muted/20 hover:bg-primary/10 border border-transparent hover:border-primary/20 transition-colors text-left"
+                    >
+                      <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-[9px] uppercase font-mono text-muted-foreground bg-muted px-1 py-0.5 rounded shrink-0">
+                        {ref.sourceType?.replace("_", " ") ?? "src"}
+                      </span>
+                      <span className="truncate font-medium">{ref.title ?? `ID: ${ref.id}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground/50">No source refs</span>
+        )}
+        {onClick && !showRefs && (
+          <div className="flex justify-end">
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-50" />
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -329,7 +371,7 @@ function PlaybooksTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   );
 }
 
-function PrinciplesTab() {
+function PrinciplesTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [domain, setDomain] = useState("all");
   const [status, setStatus] = useState("canonical");
 
@@ -351,6 +393,7 @@ function PrinciplesTab() {
               refs={p.sourceRefsJson}
               statusBadge={<Badge variant={p.status === "canonical" ? "secondary" : "outline"} className="text-[9px]">{p.status}</Badge>}
               meta={<div className="flex gap-1.5 flex-wrap"><Badge variant="outline" className="font-mono text-[10px] uppercase">{p.domainTag}</Badge>{p.confidenceScore && <span className={`text-[10px] font-mono font-bold ${getConfidenceColor(p.confidenceScore)}`}>{Math.round(parseFloat(p.confidenceScore) * 100)}% CONF</span>}</div>}
+              onNavigate={onNavigate}
             />
           ))}
         </div>
@@ -359,7 +402,7 @@ function PrinciplesTab() {
   );
 }
 
-function RulesTab() {
+function RulesTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [domain, setDomain] = useState("all");
   const [status, setStatus] = useState("canonical");
 
@@ -381,6 +424,7 @@ function RulesTab() {
               refs={r.sourceRefsJson}
               statusBadge={<Badge variant={r.status === "canonical" ? "secondary" : "outline"} className="text-[9px]">{r.status}</Badge>}
               meta={<div className="flex gap-1.5 flex-wrap"><Badge variant="outline" className="font-mono text-[10px] uppercase">{r.domainTag}</Badge><Badge variant="outline" className="text-[10px]">{r.ruleType}</Badge></div>}
+              onNavigate={onNavigate}
             />
           ))}
         </div>
@@ -389,7 +433,7 @@ function RulesTab() {
   );
 }
 
-function AntiPatternsTab() {
+function AntiPatternsTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [domain, setDomain] = useState("all");
   const [status, setStatus] = useState("canonical");
 
@@ -411,6 +455,7 @@ function AntiPatternsTab() {
               refs={a.signalsJson}
               statusBadge={<div className="flex gap-1"><Badge variant={a.riskLevel === "high" ? "destructive" : "outline"} className="text-[9px]">{a.riskLevel} risk</Badge><Badge variant={a.status === "canonical" ? "secondary" : "outline"} className="text-[9px]">{a.status}</Badge></div>}
               meta={<Badge variant="outline" className="font-mono text-[10px] uppercase">{a.domainTag}</Badge>}
+              onNavigate={onNavigate}
             />
           ))}
         </div>
@@ -446,9 +491,9 @@ export default function PlaybooksPage() {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="playbooks" className="mt-4"><PlaybooksTab onNavigate={setActiveTab} /></TabsContent>
-          <TabsContent value="principles" className="mt-4"><PrinciplesTab /></TabsContent>
-          <TabsContent value="rules" className="mt-4"><RulesTab /></TabsContent>
-          <TabsContent value="anti-patterns" className="mt-4"><AntiPatternsTab /></TabsContent>
+          <TabsContent value="principles" className="mt-4"><PrinciplesTab onNavigate={setActiveTab} /></TabsContent>
+          <TabsContent value="rules" className="mt-4"><RulesTab onNavigate={setActiveTab} /></TabsContent>
+          <TabsContent value="anti-patterns" className="mt-4"><AntiPatternsTab onNavigate={setActiveTab} /></TabsContent>
         </Tabs>
       </div>
     </Layout>
