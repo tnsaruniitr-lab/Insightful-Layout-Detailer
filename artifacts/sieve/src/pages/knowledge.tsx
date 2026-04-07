@@ -6,6 +6,7 @@ import {
   useUploadDocument,
   useProcessDocument,
   getDocument,
+  getGetDocumentQueryKey,
   DocumentDomainTag,
   DocumentRawTextStatus,
   UploadDocumentFormSourceType,
@@ -84,7 +85,7 @@ export default function KnowledgeHub() {
     ...(statusFilter !== "all" ? { status: statusFilter as DocumentRawTextStatus } : {}),
   };
 
-  const { data: documents, isLoading: docsLoading } = useListDocuments(listParams);
+  const { data: documents, isLoading: docsLoading, isError: docsError, refetch: refetchDocs } = useListDocuments(listParams);
 
   const uploadDoc = useUploadDocument();
   const processDoc = useProcessDocument();
@@ -107,7 +108,7 @@ export default function KnowledgeHub() {
 
         try {
           const doc = await getDocument(docId);
-          queryClient.setQueryData(["/api/documents", { id: docId }], doc);
+          queryClient.setQueryData(getGetDocumentQueryKey(docId), doc);
 
           if (doc.rawTextStatus === "done") {
             stopPolling();
@@ -364,6 +365,15 @@ export default function KnowledgeHub() {
           <CardContent className="p-0">
             {docsLoading ? (
               <div className="p-8 text-center text-muted-foreground">Loading documents...</div>
+            ) : docsError ? (
+              <div className="p-8 text-center space-y-3">
+                <AlertCircle className="h-8 w-8 text-destructive mx-auto" />
+                <p className="text-sm font-medium text-destructive">Failed to load documents</p>
+                <Button variant="outline" size="sm" onClick={() => refetchDocs()}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                  Retry
+                </Button>
+              </div>
             ) : documents && documents.length > 0 ? (
               <div className="divide-y">
                 {documents.map((doc) => {

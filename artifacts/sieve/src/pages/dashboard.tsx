@@ -8,9 +8,9 @@ import {
   useListPlaybooks,
   useListRules,
 } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Activity, Database, Brain, History, ArrowRight, MessageSquare, Target, BookOpen, CheckCircle } from "lucide-react";
+import { Activity, Database, Brain, History, ArrowRight, MessageSquare, Target, BookOpen, CheckCircle, AlertCircle, RefreshCw } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 
@@ -21,8 +21,8 @@ export default function Dashboard() {
     query: { enabled: !!activeBrandId, queryKey: ["brands", activeBrandId] },
   });
 
-  const { data: runs, isLoading: runsLoading } = useListRuns({ limit: 5 });
-  const { data: docs } = useListDocuments({ status: "done" });
+  const { data: runs, isLoading: runsLoading, isError: runsError, refetch: refetchRuns } = useListRuns({ limit: 5 });
+  const { data: docs, isError: docsError, refetch: refetchDocs } = useListDocuments({ status: "done" });
   const { data: principles } = useListPrinciples({ status: "canonical" });
   const { data: playbooks } = useListPlaybooks({ status: "canonical" });
   const { data: rules } = useListRules({ status: "canonical" });
@@ -67,8 +67,17 @@ export default function Dashboard() {
               <Database className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{docs?.length ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">Canonical sources indexed</p>
+              {docsError ? (
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                  <button className="text-xs text-destructive underline" onClick={() => refetchDocs()}>Retry</button>
+                </div>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold">{docs?.length ?? 0}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Canonical sources indexed</p>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -78,10 +87,19 @@ export default function Dashboard() {
               <History className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{runs?.length ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {runsLoading ? "Loading..." : "Latest 5 shown"}
-              </p>
+              {runsError ? (
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                  <button className="text-xs text-destructive underline" onClick={() => refetchRuns()}>Retry</button>
+                </div>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold">{runs?.length ?? 0}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {runsLoading ? "Loading..." : "Latest 5 shown"}
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -212,6 +230,15 @@ export default function Dashboard() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                ) : runsError ? (
+                  <div className="p-8 text-center space-y-3">
+                    <AlertCircle className="h-7 w-7 text-destructive mx-auto" />
+                    <p className="text-sm font-medium text-destructive">Failed to load runs</p>
+                    <Button variant="outline" size="sm" onClick={() => refetchRuns()}>
+                      <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                      Retry
+                    </Button>
                   </div>
                 ) : runs && runs.length > 0 ? (
                   <div className="divide-y">

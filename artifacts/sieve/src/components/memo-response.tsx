@@ -239,18 +239,37 @@ export function MemoOutputFromRun({ run }: MemoOutputFromRunProps) {
 
   const confidence = s.confidence ?? null;
 
-  const rawSourceRefs = parsedOutput.sourceRefs ?? [];
   const validSourceTypes = Object.values(SourceRefSourceType);
-  const sourceRefs: SourceRef[] = rawSourceRefs.map((ref) => ({
-    sourceType: (validSourceTypes.includes(ref.sourceType as SourceRefSourceType)
-      ? ref.sourceType
-      : "document_chunk") as SourceRefSourceType,
-    sourceId: ref.sourceId,
-    title: ref.title,
-    domainTag: ref.domainTag ?? null,
-    confidence: ref.confidence ?? null,
-    excerpt: ref.excerpt ?? null,
-  }));
+  const rawSourceRefs = parsedOutput.sourceRefs ?? [];
+
+  let sourceRefs: SourceRef[];
+  if (rawSourceRefs.length > 0) {
+    sourceRefs = rawSourceRefs.map((ref) => ({
+      sourceType: (validSourceTypes.includes(ref.sourceType as SourceRefSourceType)
+        ? ref.sourceType
+        : "document_chunk") as SourceRefSourceType,
+      sourceId: ref.sourceId,
+      title: ref.title,
+      domainTag: ref.domainTag ?? null,
+      confidence: ref.confidence ?? null,
+      excerpt: ref.excerpt ?? null,
+    }));
+  } else {
+    sourceRefs = run.sources.map((s) => {
+      const sourceType = (validSourceTypes.includes(s.sourceType as SourceRefSourceType)
+        ? s.sourceType
+        : "document_chunk") as SourceRefSourceType;
+      const label = sourceType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      return {
+        sourceType,
+        sourceId: s.sourceId,
+        title: `${label} #${s.sourceId}`,
+        domainTag: null,
+        confidence: null,
+        excerpt: null,
+      };
+    });
+  }
 
   const memo: MemoResponse = {
     id: run.id,
