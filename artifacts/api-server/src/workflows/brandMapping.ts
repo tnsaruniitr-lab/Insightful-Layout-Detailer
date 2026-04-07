@@ -24,6 +24,20 @@ interface SourceRef {
   excerpt: string | null;
 }
 
+interface ScoredPlaybook {
+  playbookId: number;
+  name: string;
+  fitScore: number;
+  icpFit: number;
+  offerFit: number;
+  geographyRelevance: number;
+  funnelRelevance: number;
+  categoryRelevance: number;
+  strategicLeverage: number;
+  reasoning: string;
+  recommendedActions: string[];
+}
+
 interface BrandMappingInput {
   brandId: number;
   question: string;
@@ -36,6 +50,7 @@ interface BrandMappingOutput {
   rationale_summary: string;
   confidence: number;
   missing_data: string;
+  scored_playbooks: ScoredPlaybook[];
   sections: {
     knownPrinciples: string;
     brandInference: string | null;
@@ -62,6 +77,7 @@ const BrandMappingState = Annotation.Root({
     rationale: string;
     confidence: number;
     missingDataSummary: string;
+    scoredPlaybooks: ScoredPlaybook[];
   } | null>({ value: (_p, n) => n, default: () => null }),
   output: Annotation<BrandMappingOutput | null>({ value: (_p, n) => n, default: () => null }),
 });
@@ -186,17 +202,34 @@ async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partia
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
-      `You are a marketing intelligence analyst. Score how well the available playbooks and rules fit a specific brand.
-For each, assess: ICP fit, offer fit, geography relevance, funnel relevance, category relevance, strategic leverage.
+      `You are a marketing intelligence analyst. Score how well each available playbook fits a specific brand.
+For each playbook score these six dimensions from 0.0 to 1.0: icpFit, offerFit, geographyRelevance, funnelRelevance, categoryRelevance, strategicLeverage.
+The overall fitScore is the weighted mean (weights: icpFit×0.25, offerFit×0.20, geographyRelevance×0.10, funnelRelevance×0.15, categoryRelevance×0.15, strategicLeverage×0.15).
+
 Structure your response as JSON:
 {
   "knownPrinciples": "Summary of which playbooks and rules are most relevant to this brand and why — cite [PB:id] and [R:id]",
-  "brandInference": "Brand-specific strategic inference — what this brand should prioritise and why, with scoring breakdown",
+  "brandInference": "Brand-specific strategic inference — what this brand should prioritise and why",
   "uncertainty": "Where confidence is low or data is ambiguous",
   "missingData": "What specific brand data would improve the scoring",
   "rationale": "1-2 sentence overall summary",
   "confidence": 0.0 to 1.0,
-  "missingDataSummary": "Top gap in one sentence"
+  "missingDataSummary": "Top gap in one sentence",
+  "scoredPlaybooks": [
+    {
+      "playbookId": <number matching [PB:id]>,
+      "name": "<playbook name>",
+      "fitScore": <0.0-1.0>,
+      "icpFit": <0.0-1.0>,
+      "offerFit": <0.0-1.0>,
+      "geographyRelevance": <0.0-1.0>,
+      "funnelRelevance": <0.0-1.0>,
+      "categoryRelevance": <0.0-1.0>,
+      "strategicLeverage": <0.0-1.0>,
+      "reasoning": "Why this playbook fits or doesn't fit this brand, referencing specific brand attributes",
+      "recommendedActions": ["action1", "action2"]
+    }
+  ]
 }
 Respond ONLY with valid JSON, no markdown.`
     ),
@@ -219,7 +252,11 @@ Likely Anti-Patterns to Watch:\n${apText || "None"}`
   let answer: BrandMappingStateType["answer"] = null;
   if (jsonMatch) {
     try {
-      answer = JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]);
+      answer = {
+        ...parsed,
+        scoredPlaybooks: Array.isArray(parsed.scoredPlaybooks) ? parsed.scoredPlaybooks : [],
+      };
     } catch {
       answer = null;
     }
@@ -234,6 +271,19 @@ Likely Anti-Patterns to Watch:\n${apText || "None"}`
       rationale: "See brandInference for raw analysis.",
       confidence: 0.4,
       missingDataSummary: "Structured parsing failed.",
+      scoredPlaybooks: state.retrievedPlaybooks.map((p) => ({
+        playbookId: p.id,
+        name: p.name,
+        fitScore: 0.5,
+        icpFit: 0.5,
+        offerFit: 0.5,
+        geographyRelevance: 0.5,
+        funnelRelevance: 0.5,
+        categoryRelevance: 0.5,
+        strategicLeverage: 0.5,
+        reasoning: "Scoring unavailable — parsing failed.",
+        recommendedActions: [],
+      })),
     };
   }
 
@@ -266,7 +316,7 @@ async function persistRunNode(state: BrandMappingStateType): Promise<Partial<Bra
     query: state.input.question,
     runType: "brand_mapping",
     status: "done",
-    outputJson: JSON.stringify({ sections: answer, sourceRefs }),
+    outputJson: JSON.stringify({ sections: answer, sourceRefs, scoredPlaybooks: answer.scoredPlaybooks }),
     rationale_summary: answer.rationale,
     missing_data: answer.missingDataSummary,
   }).returning();
@@ -288,6 +338,7 @@ async function persistRunNode(state: BrandMappingStateType): Promise<Partial<Bra
     rationale_summary: answer.rationale,
     confidence: Math.min(1, Math.max(0, answer.confidence ?? 0.5)),
     missing_data: answer.missingDataSummary,
+    scored_playbooks: answer.scoredPlaybooks,
     sections: {
       knownPrinciples: answer.knownPrinciples,
       brandInference: answer.brandInference,

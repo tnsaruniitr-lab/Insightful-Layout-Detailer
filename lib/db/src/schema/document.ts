@@ -38,7 +38,7 @@ export const domainTagEnum = pgEnum("domain_tag", [
 
 export const trustLevelEnum = pgEnum("trust_level", ["high", "medium", "low"]);
 
-const embeddingVectorType = customType<{
+export const embeddingVectorType = customType<{
   data: number[];
   config: { dimensions: number };
   configRequired: true;

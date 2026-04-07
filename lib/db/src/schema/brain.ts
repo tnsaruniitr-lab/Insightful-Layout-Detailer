@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { embeddingVectorType } from "./document";
 
 export const brainStatusEnum = pgEnum("brain_status", ["canonical", "candidate"]);
 export const riskLevelEnum = pgEnum("risk_level", ["high", "medium", "low"]);
@@ -37,6 +38,9 @@ export const principlesTable = pgTable("principles", {
   sourceCount: integer("source_count").notNull().default(1),
   sourceRefsJson: text("source_refs_json").notNull().default("[]"),
   status: brainStatusEnum("status").notNull().default("candidate"),
+  // HNSW index created via lib/db/migrations/0002_brain_embeddings.sql (not managed by drizzle-kit)
+  // Similarity search: SELECT * FROM principles ORDER BY embedding_vector <=> $1::vector LIMIT $2
+  embeddingVector: embeddingVectorType("embedding_vector", { dimensions: 1536 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
@@ -59,6 +63,9 @@ export const rulesTable = pgTable("rules", {
   confidenceScore: numeric("confidence_score", { precision: 4, scale: 3 }),
   sourceRefsJson: text("source_refs_json").notNull().default("[]"),
   status: brainStatusEnum("status").notNull().default("candidate"),
+  // HNSW index created via lib/db/migrations/0002_brain_embeddings.sql (not managed by drizzle-kit)
+  // Similarity search: SELECT * FROM rules ORDER BY embedding_vector <=> $1::vector LIMIT $2
+  embeddingVector: embeddingVectorType("embedding_vector", { dimensions: 1536 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -78,6 +85,9 @@ export const antiPatternsTable = pgTable("anti_patterns", {
   riskLevel: riskLevelEnum("risk_level").notNull().default("medium"),
   sourceRefsJson: text("source_refs_json").notNull().default("[]"),
   status: brainStatusEnum("status").notNull().default("candidate"),
+  // HNSW index created via lib/db/migrations/0002_brain_embeddings.sql (not managed by drizzle-kit)
+  // Similarity search: SELECT * FROM anti_patterns ORDER BY embedding_vector <=> $1::vector LIMIT $2
+  embeddingVector: embeddingVectorType("embedding_vector", { dimensions: 1536 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -99,6 +109,9 @@ export const playbooksTable = pgTable("playbooks", {
   confidenceScore: numeric("confidence_score", { precision: 4, scale: 3 }),
   sourceRefsJson: text("source_refs_json").notNull().default("[]"),
   status: brainStatusEnum("status").notNull().default("candidate"),
+  // HNSW index created via lib/db/migrations/0002_brain_embeddings.sql (not managed by drizzle-kit)
+  // Similarity search: SELECT * FROM playbooks ORDER BY embedding_vector <=> $1::vector LIMIT $2
+  embeddingVector: embeddingVectorType("embedding_vector", { dimensions: 1536 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

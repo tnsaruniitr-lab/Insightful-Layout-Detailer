@@ -131,6 +131,16 @@ function parseDomainTag(raw: string | undefined): DomainTag {
   return valid.includes(raw as DomainTag) ? (raw as DomainTag) : "general";
 }
 
+async function setProgress(docId: number, step: string): Promise<void> {
+  try {
+    await db.update(documentsTable)
+      .set({ errorMessage: `progress:${step}` })
+      .where(eq(documentsTable.id, docId));
+  } catch {
+    // Non-fatal — progress updates are best-effort
+  }
+}
+
 function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
@@ -142,6 +152,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 async function extractTextNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "extracting_text");
   const [doc] = await db.select().from(documentsTable).where(eq(documentsTable.id, state.documentId)).limit(1);
   if (!doc) throw new Error(`Document ${state.documentId} not found`);
 
@@ -164,6 +175,7 @@ async function extractTextNode(state: IngestionStateType): Promise<Partial<Inges
 }
 
 async function chunkDocumentNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "chunking_document");
   const rawChunks = chunkText(state.rawText, CHUNK_TARGET_TOKENS, CHUNK_OVERLAP_TOKENS);
 
   const insertedChunks = await db.transaction(async (tx) => {
@@ -195,6 +207,7 @@ async function chunkDocumentNode(state: IngestionStateType): Promise<Partial<Ing
 }
 
 async function embedChunksNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "embedding_chunks");
   const embedModel = createEmbeddings();
   const texts = state.chunks.map((c) => c.chunkText);
   const allEmbeddings: number[][] = [];
@@ -221,6 +234,7 @@ async function embedChunksNode(state: IngestionStateType): Promise<Partial<Inges
 }
 
 async function classifyChunksNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "classifying_chunks");
   const fastModel = createFastModel();
 
   const BATCH = 20;
@@ -284,6 +298,7 @@ Respond ONLY with valid JSON array, no markdown.`
 }
 
 async function extractPrinciplesNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "extracting_principles");
   const strongModel = createStrongModel();
   const domainGroups = new Map<DomainTag, ChunkRecord[]>();
 
@@ -361,6 +376,7 @@ Respond ONLY with valid JSON array, no markdown.`
 }
 
 async function extractRulesNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "extracting_rules");
   const strongModel = createStrongModel();
   const contextText = state.chunks
     .slice(0, 20)
@@ -428,6 +444,7 @@ Respond ONLY with valid JSON array, no markdown.`
 }
 
 async function extractPlaybooksNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "extracting_playbooks");
   const strongModel = createStrongModel();
   const contextText = state.chunks
     .slice(0, 20)
@@ -508,6 +525,7 @@ Respond ONLY with valid JSON array, no markdown.`
 }
 
 async function extractAntiPatternsNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "extracting_anti_patterns");
   const strongModel = createStrongModel();
   const contextText = state.chunks
     .slice(0, 20)
@@ -575,6 +593,7 @@ Respond ONLY with valid JSON array, no markdown.`
 
 
 async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "deduplicating");
   const embedModel = createEmbeddings();
 
   async function dedupeById<T extends { id: number }>(
