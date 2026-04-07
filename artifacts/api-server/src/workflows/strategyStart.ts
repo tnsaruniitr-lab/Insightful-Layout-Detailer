@@ -12,6 +12,7 @@ import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type S
 import { logger } from "../lib/logger";
 import {
   type ScoredCandidate,
+  type ScoringTrace,
   parseEmbedding,
   buildChunkToDocMap,
   buildFrequencyMap,
@@ -64,6 +65,7 @@ const StrategyState = Annotation.Root({
   brandContext: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   brandEmbedding: Annotation<number[]>({ value: (_p, n) => n, default: () => [] }),
   scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
+  scoringTrace: Annotation<ScoringTrace | null>({ value: (_p, n) => n, default: () => null }),
   lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   answer: Annotation<{
@@ -194,7 +196,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
     buildFrequencyMap(),
   ]);
 
-  const scoredObjects = scoreAndSelect({
+  const { selected: scoredObjects, trace: scoringTrace } = scoreAndSelect({
     candidates,
     chunkToDocMap,
     frequencyMap,
@@ -203,7 +205,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
     queryLabel: `strategy:${state.input.brandId}`,
   });
 
-  return { scoredObjects };
+  return { scoredObjects, scoringTrace };
 }
 
 async function generateStrategicRecommendationNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
@@ -355,6 +357,7 @@ async function persistRunNode(state: StrategyStateType): Promise<Partial<Strateg
       brandId: state.input.brandId,
       modelUsed: state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
       retrievedObjectsJson: JSON.stringify(retrievedObjects),
+      scoringTraceJson: state.scoringTrace ? JSON.stringify(state.scoringTrace) : null,
       promptText: state.lastPrompt,
       rawResponse: state.lastRawResponse,
     }).catch((err) => logger.error({ err }, "Failed to write query trace"));

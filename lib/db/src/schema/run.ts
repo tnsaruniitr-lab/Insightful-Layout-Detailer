@@ -77,6 +77,7 @@ export const queryTracesTable = pgTable("query_traces", {
   brandId: integer("brand_id"),
   modelUsed: text("model_used"),
   retrievedObjectsJson: text("retrieved_objects_json").notNull().default("[]"),
+  scoringTraceJson: text("scoring_trace_json"),
   promptText: text("prompt_text"),
   rawResponse: text("raw_response"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

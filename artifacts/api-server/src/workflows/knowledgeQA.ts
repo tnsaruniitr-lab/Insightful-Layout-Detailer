@@ -11,6 +11,7 @@ import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type S
 import { logger } from "../lib/logger";
 import {
   type ScoredCandidate,
+  type ScoringTrace,
   parseEmbedding,
   buildChunkToDocMap,
   buildFrequencyMap,
@@ -56,6 +57,7 @@ const QAState = Annotation.Root({
   input: Annotation<QAInput>(),
   questionEmbedding: Annotation<number[]>({ value: (_p, n) => n, default: () => [] }),
   scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
+  scoringTrace: Annotation<ScoringTrace | null>({ value: (_p, n) => n, default: () => null }),
   brandContext: Annotation<string | null>({ value: (_p, n) => n, default: () => null }),
   lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
@@ -179,7 +181,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
     buildFrequencyMap(),
   ]);
 
-  const scoredObjects = scoreAndSelect({
+  const { selected: scoredObjects, trace: scoringTrace } = scoreAndSelect({
     candidates,
     chunkToDocMap,
     frequencyMap,
@@ -188,7 +190,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
     queryLabel: `qa:${state.input.question.slice(0, 40)}`,
   });
 
-  return { scoredObjects };
+  return { scoredObjects, scoringTrace };
 }
 
 async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAStateType>> {
@@ -350,6 +352,7 @@ async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>>
       brandId: state.input.brandId ?? null,
       modelUsed: state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
       retrievedObjectsJson: JSON.stringify(retrievedObjects),
+      scoringTraceJson: state.scoringTrace ? JSON.stringify(state.scoringTrace) : null,
       promptText: state.lastPrompt,
       rawResponse: state.lastRawResponse,
     }).catch((err) => logger.error({ err }, "Failed to write query trace"));

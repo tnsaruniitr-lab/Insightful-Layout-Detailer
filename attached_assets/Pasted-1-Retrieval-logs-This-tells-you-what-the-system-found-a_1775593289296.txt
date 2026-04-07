@@ -1,0 +1,130 @@
+1. Retrieval logs
+
+This tells you what the system found and why.
+
+Ask Replit to log, for every query:
+
+query text
+query domain / workflow
+top 20 retrieved objects before final selection
+for each object:
+id
+type
+title
+similarity
+confidence
+source_weight
+frequency_bonus
+canonical_boost
+final_score
+final selected 12
+which objects were removed by dedupe
+which were removed by diversity cap
+
+This is the most important part.
+
+2. Prompt / answer logs
+
+This tells you what the LLM actually saw and produced.
+
+Log:
+
+final prompt sent to LLM
+model used
+raw LLM output
+parsed answer
+citations / referenced object IDs
+3. Process logs
+
+This tells you where the failure happened.
+
+For each query, you want a simple step trace:
+
+query received
+→ candidate retrieval complete
+→ scoring complete
+→ dedupe complete
+→ diversity pass complete
+→ prompt assembly complete
+→ LLM response complete
+
+And timing for each step.
+
+4. What to ask Replit right now
+
+Send this:
+
+For the query “Why is my blog not ranking on Google”, show me a full retrieval trace in plain English and JSON.
+
+I need:
+1. the top 20 retrieved candidates before final selection
+2. the full score breakdown for each candidate:
+   - similarity
+   - confidence
+   - source_weight
+   - frequency_bonus
+   - canonical_boost
+   - final_score
+3. which candidates were removed by deduplication
+4. which candidates were removed by diversity logic
+5. the final 12 passed to the LLM
+6. the exact final prompt sent to the LLM
+7. the raw LLM response
+
+Also tell me whether the intent-related objects existed in the top 20 and, if so, why they did not rank higher.
+
+That should expose whether the problem is:
+
+bad retrieval
+bad scoring
+bad dedupe/diversity
+weak prompt
+weak data
+5. What we’ll do with those logs
+
+Once you paste them here, we’ll diagnose in this order:
+
+A. Did the right objects exist in top 20?
+yes → ranking problem
+no → data/retrieval problem
+B. Did dedupe/diversity remove good objects?
+yes → post-processing problem
+C. Did final prompt contain good objects but answer still weak?
+yes → prompt / LLM reasoning problem
+
+Most likely, for your example, the issue is mainly ranking + weak data quality.
+
+6. Should you create permanent logs?
+
+Yes.
+
+For every future query, store:
+
+retrieval candidates
+score breakdown
+final selected objects
+final prompt
+final answer
+
+Without that, tuning is guesswork.
+
+7. Minimal practical process from here
+
+Do this for 5 benchmark queries:
+
+Why is my blog not ranking on Google?
+Why is bounce rate high on my landing page?
+Why am I not ranking for “best CRM for startups”?
+How do I build topical authority for a niche?
+What makes content get cited in AI answers?
+
+For each one, collect the full retrieval trace.
+
+That will tell you very quickly:
+
+where ranking is wrong
+which rules are weak/generic
+what knowledge is missing
+8. One-line answer
+
+Yes — ask for retrieval logs, scoring logs, selection logs, and final prompt/output logs. That is the only reliable way to see whether the system is failing at retrieval, ranking, or reasoning.
