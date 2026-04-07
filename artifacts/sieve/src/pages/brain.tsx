@@ -40,7 +40,7 @@ function TabErrorState({ onRetry }: { onRetry: () => void }) {
 
 export default function BrainExplorer() {
   const [domainFilter, setDomainFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("canonical");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selected, setSelected] = useState<SelectedObject | null>(null);
 
   const commonParams = {
@@ -71,6 +71,17 @@ export default function BrainExplorer() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Brain Explorer</h1>
             <p className="text-muted-foreground">Browse extracted intelligence objects across all domains.</p>
+            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+                <span><strong className="text-foreground">Canonical</strong> — reviewed &amp; promoted</span>
+              </span>
+              <span className="text-muted-foreground/40">·</span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-muted-foreground/40 inline-block" />
+                <span><strong className="text-foreground">Candidate</strong> — freshly extracted, not yet reviewed</span>
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <Select value={domainFilter} onValueChange={setDomainFilter}>
@@ -131,7 +142,10 @@ export default function BrainExplorer() {
                   >
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start gap-2 mb-2">
-                        <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${p.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={p.status} />
+                          <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+                        </div>
                         <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
                           CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
                         </Badge>
@@ -164,7 +178,8 @@ export default function BrainExplorer() {
                   >
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${r.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={r.status} />
                           <Badge variant="outline" className="font-mono text-[10px]">{r.domainTag}</Badge>
                           <Badge variant="secondary" className="font-mono text-[10px]">{r.ruleType}</Badge>
                         </div>
@@ -207,7 +222,10 @@ export default function BrainExplorer() {
                   >
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start gap-2 mb-2">
-                        <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${p.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={p.status} />
+                          <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+                        </div>
                         <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
                           CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
                         </Badge>
@@ -254,7 +272,10 @@ export default function BrainExplorer() {
                   >
                     <CardHeader className="pb-3 bg-destructive/5">
                       <div className="flex justify-between items-start gap-2 mb-2">
-                        <Badge variant="outline" className="font-mono text-[10px] border-destructive/20 text-destructive">{ap.domainTag}</Badge>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${ap.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={ap.status} />
+                          <Badge variant="outline" className="font-mono text-[10px] border-destructive/20 text-destructive">{ap.domainTag}</Badge>
+                        </div>
                         <Badge variant="secondary" className="font-mono text-[10px] bg-destructive text-destructive-foreground">
                           {ap.riskLevel.toUpperCase()} RISK
                         </Badge>
