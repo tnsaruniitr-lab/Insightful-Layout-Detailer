@@ -184,27 +184,36 @@ async function generateStrategicRecommendationNode(state: StrategyStateType): Pr
     .map((a) => `[AP:${a.id}] ${a.title} (${a.riskLevel} risk, ${a.domainTag}): ${a.description}`)
     .join("\n");
 
-  const systemPrompt = `You are a senior marketing strategist. Given a brand profile and the full intelligence library, generate a clear "where to start" strategy.
+  const systemPrompt = `You are a strategy synthesis system. Your job is to map a brand profile against the provided intelligence library — principles, playbooks, and anti-patterns — and produce a grounded "where to start" strategy. You must work exclusively from what is provided. You do not have permission to introduce general marketing strategy, industry best practices, or any knowledge from outside the provided context.
+
+STRICT RULES:
+1. Every strategic theme must be grounded in at least one provided principle [P:id] or playbook [PB:id] from the lists below.
+2. Do not introduce strategic priorities that are not represented in the provided intelligence library.
+3. If the provided library is thin on a topic that matters for this brand, name that gap explicitly in "missingData" — do not fill it with general marketing strategy.
+4. playbookIds and antiPatternIds must only contain IDs that appear in the provided playbooks and anti-patterns lists — never invent or guess IDs.
+5. "uncertainty" must reflect genuine gaps in what the provided context covers — not generic strategic hedging.
+6. "brandInference" must cite specific principles or playbooks — do not write strategic opinions without a citation.
+
 Structure your response as JSON with these exact fields:
 {
-  "knownPrinciples": "The most relevant principles that define the strategic starting point — cite [P:id] inline. 2-4 sentences per domain.",
-  "brandInference": "1-2 sentence strategic summary for this brand.",
+  "knownPrinciples": "The principles from the provided library most relevant to this brand's starting position — cite [P:id] for every claim. 2-4 sentences per domain.",
+  "brandInference": "What the provided intelligence conclusively supports as this brand's strategic position — every claim must cite [P:id] or [PB:id].",
   "themes": [
     {
-      "name": "Theme title (e.g. Authority Building)",
-      "rationale": "Why this is a priority for this specific brand right now (2-3 sentences).",
-      "playbookIds": [list of integer playbook IDs from [PB:N] references that are most relevant],
-      "antiPatternIds": [list of integer anti-pattern IDs from [AP:N] references that apply],
-      "missingData": "What specific data would make this theme clearer or more actionable."
+      "name": "Theme title drawn from the intelligence library (e.g. Authority Building)",
+      "rationale": "Why this theme is a priority — grounded in cited principles and playbooks, not general advice (2-3 sentences with citations).",
+      "playbookIds": [integer IDs only from the provided playbook list],
+      "antiPatternIds": [integer IDs only from the provided anti-pattern list],
+      "missingData": "What specific intelligence documents or brand data are absent that would sharpen this theme."
     }
   ],
-  "uncertainty": "Where the strategy lacks confidence — what brand data is missing or ambiguous",
-  "missingData": "Specific data that would sharpen strategy: brand positioning details, competitive intel, channel data, etc.",
-  "rationale": "1-2 sentence executive summary of the recommended starting position",
-  "confidence": 0.0,
-  "missingDataSummary": "The single most important data gap in one sentence"
+  "uncertainty": "What the provided intelligence library does NOT cover for this brand — be specific about gaps in the library, not general uncertainty",
+  "missingData": "Specific intelligence documents or brand data that are missing from the library and would materially change this strategy",
+  "rationale": "1-2 sentence summary of what the provided intelligence conclusively supports as the starting position",
+  "confidence": 0.0 to 1.0,
+  "missingDataSummary": "The single most important gap in the provided intelligence library, in one sentence"
 }
-Return 3-5 themes. Use only IDs from the provided playbooks and anti-patterns lists.
+Return 3-5 themes. Use ONLY IDs from the provided playbooks and anti-patterns lists.
 Respond ONLY with valid JSON, no markdown.`;
 
   const userPrompt = `Brand Context:\n${state.brandContext}

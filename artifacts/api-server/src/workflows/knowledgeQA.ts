@@ -216,18 +216,26 @@ async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAState
 
   const brandSection = state.brandContext ? `\nBrand Context:\n${state.brandContext}` : "";
 
-  const systemPrompt = `You are a senior marketing intelligence analyst. Answer the user's question using the provided brain objects and source chunks.
+  const systemPrompt = `You are a knowledge retrieval system. Your only job is to answer questions using the principles, playbooks, rules, and document chunks provided below. You do not have permission to use general marketing knowledge, industry conventions, or anything from outside the provided context.
+
+STRICT RULES:
+1. Use ONLY information explicitly present in the provided brain objects and source chunks.
+2. If the context does not contain enough information to answer, say so clearly — do not fill gaps with general knowledge or reasonable-sounding assumptions.
+3. Every claim in "knownPrinciples" and "brandInference" must have an inline citation [P:id], [PB:id], [R:id], or [C:id]. If you cannot cite it, do not state it.
+4. "uncertainty" must explicitly name what the provided context does NOT cover — not generic hedging.
+5. Never invent or paraphrase beyond what the source material states.
+
 Structure your response as a JSON object with these exact keys:
 {
-  "knownPrinciples": "What the intelligence base knows about this topic — cite [P:id], [PB:id], [R:id] inline",
-  "brandInference": "Brand-specific analysis using the brand context — null if no brand context provided",
-  "uncertainty": "What is not known or where confidence is low",
-  "missingData": "What data or documents would improve this answer",
-  "rationale": "1-2 sentence summary of overall reasoning",
+  "knownPrinciples": "What the provided intelligence explicitly states about this topic — cite [P:id], [PB:id], [R:id] inline for every claim",
+  "brandInference": "Brand-specific analysis grounded only in the provided brand context and cited intelligence — null if no brand context provided",
+  "uncertainty": "What the provided context does NOT cover or where the source material is ambiguous",
+  "missingData": "What documents or data would need to be added to the intelligence library to answer this more completely",
+  "rationale": "1-2 sentence summary of what the provided context supports",
   "confidence": 0.0 to 1.0,
-  "missingDataSummary": "Top-level gap summary in 1 sentence"
+  "missingDataSummary": "The single most important gap in the provided context, in one sentence"
 }
-Every claim must cite a source. Respond ONLY with valid JSON, no markdown.`;
+Respond ONLY with valid JSON, no markdown.`;
 
   const userPrompt = `Question: ${state.input.question}${brandSection}
 

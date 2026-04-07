@@ -201,19 +201,28 @@ async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partia
     .map((a) => `[AP:${a.id}] ${a.title} (${a.riskLevel} risk): ${a.description}`)
     .join("\n");
 
-  const systemPrompt = `You are a marketing intelligence analyst. Score how well each available playbook fits a specific brand.
-For each playbook score these six dimensions from 0.0 to 1.0: icpFit, offerFit, geographyRelevance, funnelRelevance, categoryRelevance, strategicLeverage.
+  const systemPrompt = `You are a playbook scoring system. Your job is to score how well each provided playbook fits the given brand, based strictly on the brand context and intelligence library provided. You do not have permission to draw on general marketing knowledge or introduce recommendations not grounded in the provided playbooks and rules.
+
+STRICT RULES:
+1. Score and reason ONLY from the provided playbooks, rules, and brand context — nothing else.
+2. Every claim in "knownPrinciples" and "brandInference" must cite [PB:id] or [R:id]. If you cannot cite it, do not state it.
+3. Do not introduce strategic recommendations that are not grounded in a specific provided playbook or rule.
+4. If the provided intelligence library does not contain a playbook relevant to an aspect of this brand, name that gap in "missingData" — do not substitute with general marketing advice.
+5. "uncertainty" must reflect genuine gaps in what the provided context covers — not generic hedging.
+6. playbookId values in scoredPlaybooks must only be IDs from the provided playbook list.
+
+For each playbook, score six dimensions from 0.0 to 1.0: icpFit, offerFit, geographyRelevance, funnelRelevance, categoryRelevance, strategicLeverage.
 The overall fitScore is the weighted mean (weights: icpFit×0.25, offerFit×0.20, geographyRelevance×0.10, funnelRelevance×0.15, categoryRelevance×0.15, strategicLeverage×0.15).
 
 Structure your response as JSON:
 {
-  "knownPrinciples": "Summary of which playbooks and rules are most relevant to this brand and why — cite [PB:id] and [R:id]",
-  "brandInference": "Brand-specific strategic inference — what this brand should prioritise and why",
-  "uncertainty": "Where confidence is low or data is ambiguous",
-  "missingData": "What specific brand data would improve the scoring",
-  "rationale": "1-2 sentence overall summary",
+  "knownPrinciples": "Which provided playbooks and rules are most relevant to this brand and why — every claim cites [PB:id] or [R:id]",
+  "brandInference": "What the provided intelligence explicitly supports for this brand — grounded only in cited playbooks and rules",
+  "uncertainty": "What the provided intelligence library does NOT cover for this brand's situation",
+  "missingData": "What specific brand data or intelligence documents are missing that would improve scoring accuracy",
+  "rationale": "1-2 sentence summary of what the provided context conclusively supports",
   "confidence": 0.0 to 1.0,
-  "missingDataSummary": "Top gap in one sentence",
+  "missingDataSummary": "The single most important gap in the provided context, in one sentence",
   "scoredPlaybooks": [
     {
       "playbookId": <number matching [PB:id]>,
@@ -225,8 +234,8 @@ Structure your response as JSON:
       "funnelRelevance": <0.0-1.0>,
       "categoryRelevance": <0.0-1.0>,
       "strategicLeverage": <0.0-1.0>,
-      "reasoning": "Why this playbook fits or doesn't fit this brand, referencing specific brand attributes",
-      "recommendedActions": ["action1", "action2"]
+      "reasoning": "Why this playbook fits or does not fit — cite specific brand attributes and playbook properties, no general advice",
+      "recommendedActions": ["action derived from this playbook's steps only"]
     }
   ]
 }
