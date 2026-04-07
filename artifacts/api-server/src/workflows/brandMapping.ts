@@ -125,7 +125,8 @@ async function loadBrandContextNode(state: BrandMappingStateType): Promise<Parti
 }
 
 async function retrieveRelevantPlaybooksNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
-  const vec = `[${state.questionEmbedding.join(",")}]`;
+  const hasVec = state.questionEmbedding.length > 0;
+  const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
   const rows = await pool.query<{
     id: number; name: string; summary: string; use_when: string | null;
     avoid_when: string | null; domain_tag: string; confidence_score: string | null;
@@ -134,9 +135,9 @@ async function retrieveRelevantPlaybooksNode(state: BrandMappingStateType): Prom
      FROM playbooks
      WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.questionEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 10`,
-    []
+    hasVec ? [vec] : []
   );
 
   return {
@@ -149,7 +150,8 @@ async function retrieveRelevantPlaybooksNode(state: BrandMappingStateType): Prom
 }
 
 async function retrieveRelevantRulesNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
-  const vec = `[${state.questionEmbedding.join(",")}]`;
+  const hasVec = state.questionEmbedding.length > 0;
+  const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
   const rows = await pool.query<{
     id: number; name: string; if_condition: string; then_logic: string;
     domain_tag: string; confidence_score: string | null;
@@ -157,9 +159,9 @@ async function retrieveRelevantRulesNode(state: BrandMappingStateType): Promise<
     `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score
      FROM rules WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.questionEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 8`,
-    []
+    hasVec ? [vec] : []
   );
 
   return {
@@ -173,14 +175,15 @@ async function retrieveRelevantRulesNode(state: BrandMappingStateType): Promise<
 async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
   const strongModel = createStrongModel();
 
-  const vec = `[${state.questionEmbedding.join(",")}]`;
+  const hasVec = state.questionEmbedding.length > 0;
+  const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
   const apRows = await pool.query<{ id: number; title: string; description: string; signals_json: string; domain_tag: string; risk_level: string }>(
     `SELECT id, title, description, signals_json, domain_tag, risk_level
      FROM anti_patterns WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.questionEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 5`,
-    []
+    hasVec ? [vec] : []
   );
 
   const retrievedAntiPatterns = apRows.rows.map((r) => ({

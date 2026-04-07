@@ -342,15 +342,18 @@ Respond ONLY with valid JSON array, no markdown.`
       confidence_score: number;
       source_chunk_ids: number[];
     }>;
+    const fallbackChunkId = state.chunks[0]?.id;
     for (const p of extracted) {
-      if (p.title && p.statement) {
+      const rawIds: number[] = Array.isArray(p.source_chunk_ids) ? p.source_chunk_ids.filter(Number.isInteger) : [];
+      const sourceChunkIds = rawIds.length > 0 ? rawIds : (fallbackChunkId != null ? [fallbackChunkId] : []);
+      if (p.title && p.statement && sourceChunkIds.length > 0) {
         principles.push({
           title: p.title,
           statement: p.statement,
           explanation: p.explanation ?? "",
           domainTag: domain,
           confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)),
-          sourceChunkIds: p.source_chunk_ids ?? [],
+          sourceChunkIds,
         });
       }
     }
@@ -412,17 +415,25 @@ Respond ONLY with valid JSON array, no markdown.`
   }>;
 
   const validTypes = ["diagnostic", "mapping", "scoring", "warning"];
+  const fallbackRuleChunkId = state.chunks[0]?.id;
   const rules: ExtractedRule[] = extracted
-    .filter((r) => r.name && r.if_condition && r.then_logic)
-    .map((r) => ({
-      name: r.name,
-      ruleType: (validTypes.includes(r.rule_type) ? r.rule_type : "diagnostic") as "diagnostic" | "mapping" | "scoring" | "warning",
-      ifCondition: r.if_condition,
-      thenLogic: r.then_logic,
-      domainTag: parseDomainTag(r.domain_tag),
-      confidenceScore: Math.min(1, Math.max(0, r.confidence_score ?? 0.7)),
-      sourceChunkIds: r.source_chunk_ids ?? [],
-    }));
+    .filter((r) => {
+      const rawIds: number[] = Array.isArray(r.source_chunk_ids) ? r.source_chunk_ids.filter(Number.isInteger) : [];
+      const ids = rawIds.length > 0 ? rawIds : (fallbackRuleChunkId != null ? [fallbackRuleChunkId] : []);
+      return r.name && r.if_condition && r.then_logic && ids.length > 0;
+    })
+    .map((r) => {
+      const rawIds: number[] = Array.isArray(r.source_chunk_ids) ? r.source_chunk_ids.filter(Number.isInteger) : [];
+      return {
+        name: r.name,
+        ruleType: (validTypes.includes(r.rule_type) ? r.rule_type : "diagnostic") as "diagnostic" | "mapping" | "scoring" | "warning",
+        ifCondition: r.if_condition,
+        thenLogic: r.then_logic,
+        domainTag: parseDomainTag(r.domain_tag),
+        confidenceScore: Math.min(1, Math.max(0, r.confidence_score ?? 0.7)),
+        sourceChunkIds: rawIds.length > 0 ? rawIds : [fallbackRuleChunkId!],
+      };
+    });
 
   const persistedIds: number[] = [];
   for (const item of rules) {
@@ -480,19 +491,27 @@ Respond ONLY with valid JSON array, no markdown.`
     steps: Array<{ title: string; description: string }>;
   }>;
 
+  const fallbackPlaybookChunkId = state.chunks[0]?.id;
   const playbooks: ExtractedPlaybook[] = extracted
-    .filter((p) => p.name && p.summary)
-    .map((p) => ({
-      name: p.name,
-      summary: p.summary,
-      useWhen: p.use_when ?? "",
-      avoidWhen: p.avoid_when ?? "",
-      expectedOutcomes: p.expected_outcomes ?? "",
-      domainTag: parseDomainTag(p.domain_tag),
-      confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)),
-      sourceChunkIds: p.source_chunk_ids ?? [],
-      steps: (p.steps ?? []).filter((s) => s.title),
-    }));
+    .filter((p) => {
+      const rawIds: number[] = Array.isArray(p.source_chunk_ids) ? p.source_chunk_ids.filter(Number.isInteger) : [];
+      const ids = rawIds.length > 0 ? rawIds : (fallbackPlaybookChunkId != null ? [fallbackPlaybookChunkId] : []);
+      return p.name && p.summary && ids.length > 0;
+    })
+    .map((p) => {
+      const rawIds: number[] = Array.isArray(p.source_chunk_ids) ? p.source_chunk_ids.filter(Number.isInteger) : [];
+      return {
+        name: p.name,
+        summary: p.summary,
+        useWhen: p.use_when ?? "",
+        avoidWhen: p.avoid_when ?? "",
+        expectedOutcomes: p.expected_outcomes ?? "",
+        domainTag: parseDomainTag(p.domain_tag),
+        confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)),
+        sourceChunkIds: rawIds.length > 0 ? rawIds : [fallbackPlaybookChunkId!],
+        steps: (p.steps ?? []).filter((s) => s.title),
+      };
+    });
 
   const persistedIds: number[] = [];
   for (const item of playbooks) {
@@ -561,17 +580,25 @@ Respond ONLY with valid JSON array, no markdown.`
   }>;
 
   const validRisk = ["high", "medium", "low"];
+  const fallbackApChunkId = state.chunks[0]?.id;
   const antiPatterns: ExtractedAntiPattern[] = extracted
-    .filter((a) => a.title && a.description)
-    .map((a) => ({
-      title: a.title,
-      description: a.description,
-      signals: a.signals ?? [],
-      domainTag: parseDomainTag(a.domain_tag),
-      riskLevel: (validRisk.includes(a.risk_level) ? a.risk_level : "medium") as "high" | "medium" | "low",
-      confidenceScore: Math.min(1, Math.max(0, a.confidence_score ?? 0.7)),
-      sourceChunkIds: a.source_chunk_ids ?? [],
-    }));
+    .filter((a) => {
+      const rawIds: number[] = Array.isArray(a.source_chunk_ids) ? a.source_chunk_ids.filter(Number.isInteger) : [];
+      const ids = rawIds.length > 0 ? rawIds : (fallbackApChunkId != null ? [fallbackApChunkId] : []);
+      return a.title && a.description && ids.length > 0;
+    })
+    .map((a) => {
+      const rawIds: number[] = Array.isArray(a.source_chunk_ids) ? a.source_chunk_ids.filter(Number.isInteger) : [];
+      return {
+        title: a.title,
+        description: a.description,
+        signals: a.signals ?? [],
+        domainTag: parseDomainTag(a.domain_tag),
+        riskLevel: (validRisk.includes(a.risk_level) ? a.risk_level : "medium") as "high" | "medium" | "low",
+        confidenceScore: Math.min(1, Math.max(0, a.confidence_score ?? 0.7)),
+        sourceChunkIds: rawIds.length > 0 ? rawIds : [fallbackApChunkId!],
+      };
+    });
 
   const persistedIds: number[] = [];
   for (const item of antiPatterns) {

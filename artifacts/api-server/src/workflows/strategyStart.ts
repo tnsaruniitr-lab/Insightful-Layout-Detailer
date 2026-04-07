@@ -101,7 +101,8 @@ async function loadBrandContextNode(state: StrategyStateType): Promise<Partial<S
 }
 
 async function retrieveRelevantPlaybooksNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
-  const vec = `[${state.brandEmbedding.join(",")}]`;
+  const hasVec = state.brandEmbedding.length > 0;
+  const vec = hasVec ? `[${state.brandEmbedding.join(",")}]` : null;
   const rows = await pool.query<{
     id: number; name: string; summary: string; use_when: string | null;
     expected_outcomes: string | null; domain_tag: string; confidence_score: string | null;
@@ -109,9 +110,9 @@ async function retrieveRelevantPlaybooksNode(state: StrategyStateType): Promise<
     `SELECT id, name, summary, use_when, expected_outcomes, domain_tag, confidence_score
      FROM playbooks WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.brandEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 12`,
-    []
+    hasVec ? [vec] : []
   );
 
   return {
@@ -124,7 +125,8 @@ async function retrieveRelevantPlaybooksNode(state: StrategyStateType): Promise<
 }
 
 async function retrieveRelevantPrinciplesNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
-  const vec = `[${state.brandEmbedding.join(",")}]`;
+  const hasVec = state.brandEmbedding.length > 0;
+  const vec = hasVec ? `[${state.brandEmbedding.join(",")}]` : null;
   const rows = await pool.query<{
     id: number; title: string; statement: string; explanation: string | null;
     domain_tag: string; confidence_score: string | null;
@@ -132,9 +134,9 @@ async function retrieveRelevantPrinciplesNode(state: StrategyStateType): Promise
     `SELECT id, title, statement, explanation, domain_tag, confidence_score
      FROM principles WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.brandEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 12`,
-    []
+    hasVec ? [vec] : []
   );
 
   return {
@@ -148,14 +150,15 @@ async function retrieveRelevantPrinciplesNode(state: StrategyStateType): Promise
 async function generateStrategicRecommendationNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
   const strongModel = createStrongModel();
 
-  const vec = `[${state.brandEmbedding.join(",")}]`;
+  const hasVecAp = state.brandEmbedding.length > 0;
+  const vecAp = hasVecAp ? `[${state.brandEmbedding.join(",")}]` : null;
   const apRows = await pool.query<{ id: number; title: string; description: string; domain_tag: string; risk_level: string }>(
     `SELECT id, title, description, domain_tag, risk_level
      FROM anti_patterns WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.brandEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVecAp ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 6`,
-    []
+    hasVecAp ? [vecAp] : []
   );
   const retrievedAntiPatterns = apRows.rows.map((r) => ({
     id: r.id, title: r.title, description: r.description, domainTag: r.domain_tag, riskLevel: r.risk_level,
