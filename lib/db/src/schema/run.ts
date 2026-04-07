@@ -66,3 +66,20 @@ export const insertMappingRunSourceSchema = createInsertSchema(
 ).omit({ id: true });
 export type InsertMappingRunSource = z.infer<typeof insertMappingRunSourceSchema>;
 export type MappingRunSource = typeof mappingRunSourcesTable.$inferSelect;
+
+export const queryTracesTable = pgTable("query_traces", {
+  id: serial("id").primaryKey(),
+  mappingRunId: integer("mapping_run_id").references(() => mappingRunsTable.id, {
+    onDelete: "cascade",
+  }),
+  runType: text("run_type").notNull(),
+  query: text("query"),
+  brandId: integer("brand_id"),
+  modelUsed: text("model_used"),
+  retrievedObjectsJson: text("retrieved_objects_json").notNull().default("[]"),
+  promptText: text("prompt_text"),
+  rawResponse: text("raw_response"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type QueryTrace = typeof queryTracesTable.$inferSelect;

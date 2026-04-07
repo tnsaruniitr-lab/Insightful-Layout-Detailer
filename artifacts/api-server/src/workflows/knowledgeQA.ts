@@ -7,6 +7,7 @@ import {
   rulesTable,
   mappingRunsTable,
   mappingRunSourcesTable,
+  queryTracesTable,
 } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
@@ -55,6 +56,8 @@ const QAState = Annotation.Root({
   retrievedRules: Annotation<Array<{ id: number; name: string; ifCondition: string; thenLogic: string; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
   retrievedChunks: Annotation<Array<{ id: number; chunkText: string; domainTag: string | null; documentId: number }>>({ value: (_p, n) => n, default: () => [] }),
   brandContext: Annotation<string | null>({ value: (_p, n) => n, default: () => null }),
+  lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
+  lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   answer: Annotation<{
     knownPrinciples: string;
     brandInference: string | null;
@@ -107,7 +110,7 @@ async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAS
      ${domainClause}
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 10`,
+     LIMIT 4`,
     principleParams
   );
 
@@ -125,7 +128,7 @@ async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAS
      ${playbookDomainClause}
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 10`,
+     LIMIT 4`,
     playbookParams
   );
 
@@ -139,7 +142,7 @@ async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAS
      WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 10`,
+     LIMIT 4`,
     ruleParams
   );
 
@@ -170,7 +173,7 @@ async function retrieveSupportingChunksNode(state: QAStateType): Promise<Partial
      FROM document_chunks
      WHERE embedding_vector IS NOT NULL
      ORDER BY embedding_vector <=> $1::vector
-     LIMIT 15`,
+     LIMIT 5`,
     [vec]
   );
   const retrievedChunks = rows.rows.map((r) => ({
@@ -209,19 +212,14 @@ async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAState
     .map((r) => `• [R:${r.id}] ${r.name}: IF ${r.ifCondition} THEN ${r.thenLogic}`)
     .join("\n");
 
-  const chunksContext = state.retrievedChunks
-    .slice(0, 8)
-    .map((c) => `• [C:${c.id}] ${c.chunkText.slice(0, 300)}`)
-    .join("\n");
-
   const brandSection = state.brandContext ? `\nBrand Context:\n${state.brandContext}` : "";
 
-  const systemPrompt = `You are a knowledge retrieval system. Your only job is to answer questions using the principles, playbooks, rules, and document chunks provided below. You do not have permission to use general marketing knowledge, industry conventions, or anything from outside the provided context.
+  const systemPrompt = `You are a knowledge retrieval system. Your only job is to answer questions using the structured intelligence objects provided below. You do not have permission to use general marketing knowledge, industry conventions, or anything from outside the provided context.
 
 STRICT RULES:
-1. Use ONLY information explicitly present in the provided brain objects and source chunks.
+1. Use ONLY information explicitly present in the provided principles, playbooks, and rules.
 2. If the context does not contain enough information to answer, say so clearly — do not fill gaps with general knowledge or reasonable-sounding assumptions.
-3. Every claim in "knownPrinciples" and "brandInference" must have an inline citation [P:id], [PB:id], [R:id], or [C:id]. If you cannot cite it, do not state it.
+3. Every claim in "knownPrinciples" and "brandInference" must have an inline citation [P:id], [PB:id], or [R:id]. If you cannot cite it, do not state it.
 4. "uncertainty" must explicitly name what the provided context does NOT cover — not generic hedging.
 5. Never invent or paraphrase beyond what the source material states.
 
@@ -246,10 +244,7 @@ Available Playbooks:
 ${playbooksContext || "None"}
 
 Available Rules:
-${rulesContext || "None"}
-
-Supporting Source Chunks:
-${chunksContext || "None"}`;
+${rulesContext || "None"}`;
 
   const text = await invokeSynthesisModel(
     state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
@@ -259,8 +254,11 @@ ${chunksContext || "None"}`;
   );
   const jsonMatch = text.match(/\{[\s\S]*\}/);
 
+  const traceState = { lastPrompt: userPrompt, lastRawResponse: text };
+
   if (!jsonMatch) {
     return {
+      ...traceState,
       answer: {
         knownPrinciples: text,
         brandInference: state.brandContext ? "Brand context was provided but synthesis failed." : null,
@@ -283,9 +281,10 @@ ${chunksContext || "None"}`;
       confidence: number;
       missingDataSummary: string;
     };
-    return { answer: parsed };
+    return { ...traceState, answer: parsed };
   } catch {
     return {
+      ...traceState,
       answer: {
         knownPrinciples: text,
         brandInference: null,
@@ -327,14 +326,6 @@ async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>>
       confidence: r.confidenceScore ? parseFloat(r.confidenceScore) : null,
       excerpt: `IF ${r.ifCondition} THEN ${r.thenLogic}`.slice(0, 200),
     })),
-    ...state.retrievedChunks.slice(0, 5).map((c) => ({
-      sourceType: "document_chunk" as const,
-      sourceId: c.id,
-      title: `Chunk ${c.id}`,
-      domainTag: c.domainTag,
-      confidence: null,
-      excerpt: c.chunkText.slice(0, 200),
-    })),
   ];
 
   const [run] = await db.insert(mappingRunsTable).values({
@@ -354,6 +345,25 @@ async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>>
       sourceId: ref.sourceId,
     }));
     await db.insert(mappingRunSourcesTable).values(runSourceValues);
+  }
+
+  if (run) {
+    const retrievedObjects = [
+      ...state.retrievedPrinciples.map((p) => ({ type: "principle", id: p.id, title: p.title, confidence: p.confidenceScore })),
+      ...state.retrievedPlaybooks.map((p) => ({ type: "playbook", id: p.id, title: p.name, confidence: p.confidenceScore })),
+      ...state.retrievedRules.map((r) => ({ type: "rule", id: r.id, title: r.name, confidence: r.confidenceScore })),
+      ...state.retrievedChunks.map((c) => ({ type: "chunk", id: c.id, title: `Chunk ${c.id}`, confidence: null })),
+    ];
+    await db.insert(queryTracesTable).values({
+      mappingRunId: run.id,
+      runType: "knowledge_answer",
+      query: state.input.question,
+      brandId: state.input.brandId ?? null,
+      modelUsed: state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
+      retrievedObjectsJson: JSON.stringify(retrievedObjects),
+      promptText: state.lastPrompt,
+      rawResponse: state.lastRawResponse,
+    }).catch((err) => logger.error({ err }, "Failed to write query trace"));
   }
 
   const output: QAOutput = {

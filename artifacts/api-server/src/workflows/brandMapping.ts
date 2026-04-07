@@ -9,6 +9,7 @@ import {
   antiPatternsTable,
   mappingRunsTable,
   mappingRunSourcesTable,
+  queryTracesTable,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
@@ -69,6 +70,8 @@ const BrandMappingState = Annotation.Root({
   retrievedPlaybooks: Annotation<Array<{ id: number; name: string; summary: string; useWhen: string | null; avoidWhen: string | null; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
   retrievedRules: Annotation<Array<{ id: number; name: string; ifCondition: string; thenLogic: string; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
   retrievedAntiPatterns: Annotation<Array<{ id: number; title: string; description: string; signalsJson: string; domainTag: string; riskLevel: string }>>({ value: (_p, n) => n, default: () => [] }),
+  lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
+  lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   answer: Annotation<{
     knownPrinciples: string;
     brandInference: string;
@@ -136,7 +139,7 @@ async function retrieveRelevantPlaybooksNode(state: BrandMappingStateType): Prom
      WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 10`,
+     LIMIT 5`,
     hasVec ? [vec] : []
   );
 
@@ -160,7 +163,7 @@ async function retrieveRelevantRulesNode(state: BrandMappingStateType): Promise<
      FROM rules WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 8`,
+     LIMIT 4`,
     hasVec ? [vec] : []
   );
 
@@ -180,7 +183,7 @@ async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partia
      FROM anti_patterns WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 5`,
+     LIMIT 3`,
     hasVec ? [vec] : []
   );
 
@@ -297,7 +300,7 @@ Likely Anti-Patterns to Watch:\n${apText || "None"}`;
     };
   }
 
-  return { answer, retrievedAntiPatterns };
+  return { answer, retrievedAntiPatterns, lastPrompt: userPrompt, lastRawResponse: text };
 }
 
 async function persistRunNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
@@ -339,6 +342,24 @@ async function persistRunNode(state: BrandMappingStateType): Promise<Partial<Bra
         sourceId: ref.sourceId,
       }))
     );
+  }
+
+  if (run) {
+    const retrievedObjects = [
+      ...state.retrievedPlaybooks.map((p) => ({ type: "playbook", id: p.id, title: p.name, confidence: p.confidenceScore })),
+      ...state.retrievedRules.map((r) => ({ type: "rule", id: r.id, title: r.name, confidence: r.confidenceScore })),
+      ...state.retrievedAntiPatterns.map((a) => ({ type: "anti_pattern", id: a.id, title: a.title, confidence: null })),
+    ];
+    await db.insert(queryTracesTable).values({
+      mappingRunId: run.id,
+      runType: "brand_mapping",
+      query: state.input.question,
+      brandId: state.input.brandId,
+      modelUsed: state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
+      retrievedObjectsJson: JSON.stringify(retrievedObjects),
+      promptText: state.lastPrompt,
+      rawResponse: state.lastRawResponse,
+    }).catch((err) => logger.error({ err }, "Failed to write query trace"));
   }
 
   const output: BrandMappingOutput = {

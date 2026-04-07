@@ -5,6 +5,7 @@ import {
   competitorsTable,
   mappingRunsTable,
   mappingRunSourcesTable,
+  queryTracesTable,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
@@ -58,6 +59,8 @@ const StrategyState = Annotation.Root({
   retrievedPlaybooks: Annotation<Array<{ id: number; name: string; summary: string; useWhen: string | null; expectedOutcomes: string | null; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
   retrievedPrinciples: Annotation<Array<{ id: number; title: string; statement: string; explanation: string | null; domainTag: string; confidenceScore: string | null }>>({ value: (_p, n) => n, default: () => [] }),
   retrievedAntiPatterns: Annotation<Array<{ id: number; title: string; description: string; domainTag: string; riskLevel: string }>>({ value: (_p, n) => n, default: () => [] }),
+  lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
+  lastRawResponse: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
   answer: Annotation<{
     knownPrinciples: string;
     brandInference: string;
@@ -121,7 +124,7 @@ async function retrieveRelevantPlaybooksNode(state: StrategyStateType): Promise<
      FROM playbooks WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 12`,
+     LIMIT 5`,
     hasVec ? [vec] : []
   );
 
@@ -145,7 +148,7 @@ async function retrieveRelevantPrinciplesNode(state: StrategyStateType): Promise
      FROM principles WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 12`,
+     LIMIT 4`,
     hasVec ? [vec] : []
   );
 
@@ -165,7 +168,7 @@ async function generateStrategicRecommendationNode(state: StrategyStateType): Pr
      FROM anti_patterns WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
      ${hasVecAp ? `embedding_vector <=> $1::vector` : "id"}
-     LIMIT 6`,
+     LIMIT 3`,
     hasVecAp ? [vecAp] : []
   );
   const retrievedAntiPatterns = apRows.rows.map((r) => ({
@@ -262,7 +265,7 @@ Anti-Patterns to Watch:\n${apText || "None available"}`;
     };
   }
 
-  return { answer, retrievedAntiPatterns };
+  return { answer, retrievedAntiPatterns, lastPrompt: userPrompt, lastRawResponse: text };
 }
 
 async function persistRunNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
@@ -304,6 +307,24 @@ async function persistRunNode(state: StrategyStateType): Promise<Partial<Strateg
         sourceId: ref.sourceId,
       }))
     );
+  }
+
+  if (run) {
+    const retrievedObjects = [
+      ...state.retrievedPrinciples.map((p) => ({ type: "principle", id: p.id, title: p.title, confidence: p.confidenceScore })),
+      ...state.retrievedPlaybooks.map((p) => ({ type: "playbook", id: p.id, title: p.name, confidence: p.confidenceScore })),
+      ...state.retrievedAntiPatterns.map((a) => ({ type: "anti_pattern", id: a.id, title: a.title, confidence: null })),
+    ];
+    await db.insert(queryTracesTable).values({
+      mappingRunId: run.id,
+      runType: "strategy_start",
+      query: null,
+      brandId: state.input.brandId,
+      modelUsed: state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
+      retrievedObjectsJson: JSON.stringify(retrievedObjects),
+      promptText: state.lastPrompt,
+      rawResponse: state.lastRawResponse,
+    }).catch((err) => logger.error({ err }, "Failed to write query trace"));
   }
 
   const output: StrategyOutput = {
