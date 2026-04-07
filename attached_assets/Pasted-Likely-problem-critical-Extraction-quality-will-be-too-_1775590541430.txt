@@ -1,0 +1,201 @@
+Likely problem (critical)
+
+Extraction quality will be:
+
+too verbose OR
+too generic OR
+duplicated across chunks
+
+👉 This is the #1 failure point in most systems
+
+Fix
+
+Force stricter schema:
+
+{
+  "type": "rule",
+  "statement": "...",
+  "condition": "...",
+  "action": "...",
+  "confidence": "...",
+  "source_id": "...",
+  "evidence": "quote from source"
+}
+
+Also enforce:
+
+1 idea per object
+no summaries
+no fluff
+C. Embeddings
+What’s good
+using same model for query + data ✅
+embedding both chunks + objects ✅
+Problem
+
+👉 Embedding BOTH chunks + objects is redundant and harmful
+
+Because:
+
+chunks are noisy
+objects are clean
+
+You are mixing both in retrieval
+
+Fix (high priority)
+
+👉 Stop using raw chunks in final retrieval
+
+Keep:
+
+principles
+rules
+playbooks
+anti-patterns
+
+Chunks only for:
+
+traceability
+fallback
+D. Retrieval (CORE ISSUE)
+What’s good
+vector search per type ✅
+parallel queries ✅
+Problem 1 — No cross-type ranking
+
+You retrieve:
+
+top N principles
+top N rules
+top N playbooks
+
+👉 But you don’t compare them globally
+
+So:
+
+weak rule may enter just because it’s top in its category
+Problem 2 — No real scoring logic
+
+You only use:
+
+cosine distance
+canonical vs candidate
+
+👉 That’s too weak
+
+Fix (very high priority)
+
+Create unified scoring:
+
+final_score =
+  similarity_score
+  + source_weight
+  + object_confidence
+  + frequency_bonus
+
+Then:
+
+👉 merge all objects into ONE ranked list
+
+Problem 3 — No deduplication
+
+Same idea may appear multiple times
+
+👉 wastes LLM context
+
+Fix
+cluster similar objects
+keep best one
+E. Ranking / Filtering
+What’s good
+canonical vs candidate ✅
+domain filter ✅
+Problem
+
+👉 “canonical first” is too blunt
+
+You may push:
+
+less relevant canonical over highly relevant candidate
+Fix
+
+Use:
+
+canonical as weight boost
+NOT hard ordering
+F. Final Prompt (BIG ISSUE)
+What’s good
+structured context ✅
+grounding rules ✅
+Problem 1 — Too much context
+
+You pass:
+
+principles
+rules
+playbooks
+anti-patterns
+chunks
+
+👉 This will overload the model
+
+Problem 2 — Raw chunks included
+
+This is dangerous:
+
+noisy
+unstructured
+may override clean rules
+Fix (very high priority)
+
+👉 Remove chunks from default context
+
+Only include:
+
+top 8–12 structured objects total
+Problem 3 — No reasoning guidance
+
+You give data, but not strict reasoning format
+
+Fix
+
+Force structure:
+
+1. Diagnosis
+2. Supporting rules
+3. Conflicts / trade-offs
+4. Recommendation
+5. Confidence
+G. LLM layer
+What’s good
+model choice flexibility ✅
+Problem
+
+👉 Too much reliance on LLM to “figure it out”
+
+Because upstream control is weak
+
+Fix
+
+Improve upstream → LLM quality improves automatically
+
+H. Logs / Tracing
+Problem (serious)
+
+👉 No persistent traces
+
+You cannot debug:
+
+retrieval quality
+answer grounding
+Fix (high priority)
+
+Store per query:
+
+{
+  query,
+  retrieved_objects,
+  scores,
+  final_prompt,
+  final_answer
+}
