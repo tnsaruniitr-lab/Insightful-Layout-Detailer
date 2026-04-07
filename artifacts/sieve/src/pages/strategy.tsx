@@ -5,7 +5,7 @@ import { useGetBrandStrategy, MemoResponse } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Settings2, Loader2, ArrowRightCircle, AlertCircle, RefreshCw } from "lucide-react";
-import { MemoResponseView } from "@/components/memo-response";
+import { StrategyResponseView } from "@/components/strategy-response";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 
@@ -127,7 +127,7 @@ export default function StrategyOutput() {
               </Button>
             </div>
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <MemoResponseView memo={response} />
+              <StrategyResponseView memo={response} />
             </div>
           </div>
         )}
