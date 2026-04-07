@@ -91,7 +91,12 @@ async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateTyp
 
 async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAStateType>> {
   const vec = `[${state.questionEmbedding.join(",")}]`;
+  const hasVec = state.questionEmbedding.length > 0;
 
+  const principleParams: unknown[] = hasVec ? [vec] : [];
+  const domainClause = state.input.domainFilter
+    ? `AND domain_tag = $${principleParams.push(state.input.domainFilter)}`
+    : "";
   const principleRows = await pool.query<{
     id: number; title: string; statement: string; explanation: string | null;
     domain_tag: string; confidence_score: string | null; source_refs_json: string;
@@ -99,13 +104,17 @@ async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAS
     `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json
      FROM principles
      WHERE status IN ('canonical', 'candidate')
-     ${state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : ""}
+     ${domainClause}
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.questionEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 10`,
-    []
+    principleParams
   );
 
+  const playbookParams: unknown[] = hasVec ? [vec] : [];
+  const playbookDomainClause = state.input.domainFilter
+    ? `AND domain_tag = $${playbookParams.push(state.input.domainFilter)}`
+    : "";
   const playbookRows = await pool.query<{
     id: number; name: string; summary: string; domain_tag: string;
     confidence_score: string | null; source_refs_json: string;
@@ -113,13 +122,14 @@ async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAS
     `SELECT id, name, summary, domain_tag, confidence_score, source_refs_json
      FROM playbooks
      WHERE status IN ('canonical', 'candidate')
-     ${state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : ""}
+     ${playbookDomainClause}
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.questionEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 10`,
-    []
+    playbookParams
   );
 
+  const ruleParams: unknown[] = hasVec ? [vec] : [];
   const ruleRows = await pool.query<{
     id: number; name: string; if_condition: string; then_logic: string;
     domain_tag: string; confidence_score: string | null;
@@ -128,9 +138,9 @@ async function retrieveBrainObjectsNode(state: QAStateType): Promise<Partial<QAS
      FROM rules
      WHERE status IN ('canonical', 'candidate')
      ORDER BY CASE WHEN status = 'canonical' THEN 0 ELSE 1 END,
-     ${state.questionEmbedding.length > 0 ? `embedding_vector <=> '${vec}'::vector` : "id"}
+     ${hasVec ? `embedding_vector <=> $1::vector` : "id"}
      LIMIT 10`,
-    []
+    ruleParams
   );
 
   const retrievedPrinciples = principleRows.rows.map((r) => ({

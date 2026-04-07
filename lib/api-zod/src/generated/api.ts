@@ -372,7 +372,7 @@ export const ListExamplesResponse = zod.array(ListExamplesResponseItem);
 export const AskBrainBody = zod.object({
   question: zod.string(),
   brandId: zod.number().optional(),
-  domainFilter: zod.string().optional(),
+  domainFilter: zod.enum(["seo", "geo", "aeo", "content", "entity", "general"]).optional(),
   useBrandContext: zod.boolean().optional(),
 });
 

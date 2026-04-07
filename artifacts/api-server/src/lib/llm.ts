@@ -30,6 +30,10 @@ export function createStrongModel(): ChatOpenAI {
 }
 
 export function createEmbeddings(): OpenAIEmbeddings {
+  // Note: The Replit AI Integration proxy (AI_INTEGRATIONS_OPENAI_BASE_URL) only proxies
+  // chat completions — it does not support the /v1/embeddings endpoint. Embeddings therefore
+  // use OPENAI_API_KEY directly against the official OpenAI API. This is the correct and
+  // only supported approach in this environment.
   return new OpenAIEmbeddings({
     model: "text-embedding-3-small",
     openAIApiKey: requireEnv("OPENAI_API_KEY"),

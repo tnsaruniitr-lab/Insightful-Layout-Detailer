@@ -10,7 +10,7 @@ import {
   playbookStepsTable,
   antiPatternsTable,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createFastModel, createStrongModel, createEmbeddings } from "../lib/llm";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { logger } from "../lib/logger";
@@ -81,6 +81,10 @@ const IngestionState = Annotation.Root({
   extractedRules: Annotation<ExtractedRule[]>({ value: (_prev, next) => next, default: () => [] }),
   extractedPlaybooks: Annotation<ExtractedPlaybook[]>({ value: (_prev, next) => next, default: () => [] }),
   extractedAntiPatterns: Annotation<ExtractedAntiPattern[]>({ value: (_prev, next) => next, default: () => [] }),
+  persistedPrincipleIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
+  persistedRuleIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
+  persistedPlaybookIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
+  persistedAntiPatternIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
   status: Annotation<"processing" | "done" | "error">({ value: (_prev, next) => next, default: () => "processing" as const }),
   errorMessage: Annotation<string | null>({ value: (_prev, next) => next, default: () => null }),
 });
@@ -313,37 +317,47 @@ Respond ONLY with valid JSON array, no markdown.`
       new HumanMessage(`Domain: ${domain}\n\nContent:\n${contextText}`),
     ]), 2, "extract_principles");
 
-    try {
-      const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const extracted = JSON.parse(jsonMatch[0]) as Array<{
-          title: string;
-          statement: string;
-          explanation: string;
-          confidence_score: number;
-          source_chunk_ids: number[];
-        }>;
-        for (const p of extracted) {
-          if (p.title && p.statement) {
-            principles.push({
-              title: p.title,
-              statement: p.statement,
-              explanation: p.explanation ?? "",
-              domainTag: domain,
-              confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)),
-              sourceChunkIds: p.source_chunk_ids ?? [],
-            });
-          }
-        }
+    const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error(`extract_principles: LLM returned non-JSON for domain ${domain}: ${text.slice(0, 200)}`);
+    const extracted = JSON.parse(jsonMatch[0]) as Array<{
+      title: string;
+      statement: string;
+      explanation: string;
+      confidence_score: number;
+      source_chunk_ids: number[];
+    }>;
+    for (const p of extracted) {
+      if (p.title && p.statement) {
+        principles.push({
+          title: p.title,
+          statement: p.statement,
+          explanation: p.explanation ?? "",
+          domainTag: domain,
+          confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)),
+          sourceChunkIds: p.source_chunk_ids ?? [],
+        });
       }
-    } catch (err) {
-      logger.warn({ err, domain }, "Failed to parse principles extraction");
     }
   }
 
+  const persistedIds: number[] = [];
+  for (const item of principles) {
+    const [row] = await db.insert(principlesTable).values({
+      title: item.title,
+      statement: item.statement,
+      explanation: item.explanation,
+      domainTag: item.domainTag,
+      confidenceScore: String(item.confidenceScore),
+      sourceCount: 1,
+      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      status: "candidate",
+    }).returning();
+    if (row) persistedIds.push(row.id);
+  }
+
   logger.info({ docId: state.documentId, count: principles.length }, "Principles extracted");
-  return { extractedPrinciples: principles };
+  return { extractedPrinciples: principles, persistedPrincipleIds: persistedIds };
 }
 
 async function extractRulesNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
@@ -352,8 +366,6 @@ async function extractRulesNode(state: IngestionStateType): Promise<Partial<Inge
     .slice(0, 20)
     .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 400)}`)
     .join("\n---\n");
-
-  const rules: ExtractedRule[] = [];
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
@@ -370,40 +382,49 @@ Respond ONLY with valid JSON array, no markdown.`
     new HumanMessage(`Content:\n${contextText}`),
   ]), 2, "extract_rules");
 
-  try {
-    const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const extracted = JSON.parse(jsonMatch[0]) as Array<{
-        name: string;
-        rule_type: string;
-        if_condition: string;
-        then_logic: string;
-        domain_tag: string;
-        confidence_score: number;
-        source_chunk_ids: number[];
-      }>;
-      for (const r of extracted) {
-        if (r.name && r.if_condition && r.then_logic) {
-          const validTypes = ["diagnostic", "mapping", "scoring", "warning"];
-          rules.push({
-            name: r.name,
-            ruleType: (validTypes.includes(r.rule_type) ? r.rule_type : "diagnostic") as "diagnostic" | "mapping" | "scoring" | "warning",
-            ifCondition: r.if_condition,
-            thenLogic: r.then_logic,
-            domainTag: parseDomainTag(r.domain_tag),
-            confidenceScore: Math.min(1, Math.max(0, r.confidence_score ?? 0.7)),
-            sourceChunkIds: r.source_chunk_ids ?? [],
-          });
-        }
-      }
-    }
-  } catch (err) {
-    logger.warn({ err }, "Failed to parse rules extraction");
+  const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error(`extract_rules: LLM returned non-JSON: ${text.slice(0, 200)}`);
+  const extracted = JSON.parse(jsonMatch[0]) as Array<{
+    name: string;
+    rule_type: string;
+    if_condition: string;
+    then_logic: string;
+    domain_tag: string;
+    confidence_score: number;
+    source_chunk_ids: number[];
+  }>;
+
+  const validTypes = ["diagnostic", "mapping", "scoring", "warning"];
+  const rules: ExtractedRule[] = extracted
+    .filter((r) => r.name && r.if_condition && r.then_logic)
+    .map((r) => ({
+      name: r.name,
+      ruleType: (validTypes.includes(r.rule_type) ? r.rule_type : "diagnostic") as "diagnostic" | "mapping" | "scoring" | "warning",
+      ifCondition: r.if_condition,
+      thenLogic: r.then_logic,
+      domainTag: parseDomainTag(r.domain_tag),
+      confidenceScore: Math.min(1, Math.max(0, r.confidence_score ?? 0.7)),
+      sourceChunkIds: r.source_chunk_ids ?? [],
+    }));
+
+  const persistedIds: number[] = [];
+  for (const item of rules) {
+    const [row] = await db.insert(rulesTable).values({
+      name: item.name,
+      ruleType: item.ruleType,
+      ifCondition: item.ifCondition,
+      thenLogic: item.thenLogic,
+      domainTag: item.domainTag,
+      confidenceScore: String(item.confidenceScore),
+      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      status: "candidate",
+    }).returning();
+    if (row) persistedIds.push(row.id);
   }
 
   logger.info({ docId: state.documentId, count: rules.length }, "Rules extracted");
-  return { extractedRules: rules };
+  return { extractedRules: rules, persistedRuleIds: persistedIds };
 }
 
 async function extractPlaybooksNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
@@ -412,8 +433,6 @@ async function extractPlaybooksNode(state: IngestionStateType): Promise<Partial<
     .slice(0, 20)
     .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 400)}`)
     .join("\n---\n");
-
-  const playbooks: ExtractedPlaybook[] = [];
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
@@ -429,43 +448,63 @@ Respond ONLY with valid JSON array, no markdown.`
     new HumanMessage(`Content:\n${contextText}`),
   ]), 2, "extract_playbooks");
 
-  try {
-    const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const extracted = JSON.parse(jsonMatch[0]) as Array<{
-        name: string;
-        summary: string;
-        use_when: string;
-        avoid_when: string;
-        expected_outcomes: string;
-        domain_tag: string;
-        confidence_score: number;
-        source_chunk_ids: number[];
-        steps: Array<{ title: string; description: string }>;
-      }>;
-      for (const p of extracted) {
-        if (p.name && p.summary) {
-          playbooks.push({
-            name: p.name,
-            summary: p.summary,
-            useWhen: p.use_when ?? "",
-            avoidWhen: p.avoid_when ?? "",
-            expectedOutcomes: p.expected_outcomes ?? "",
-            domainTag: parseDomainTag(p.domain_tag),
-            confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)),
-            sourceChunkIds: p.source_chunk_ids ?? [],
-            steps: (p.steps ?? []).filter((s) => s.title),
-          });
-        }
+  const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error(`extract_playbooks: LLM returned non-JSON: ${text.slice(0, 200)}`);
+  const extracted = JSON.parse(jsonMatch[0]) as Array<{
+    name: string;
+    summary: string;
+    use_when: string;
+    avoid_when: string;
+    expected_outcomes: string;
+    domain_tag: string;
+    confidence_score: number;
+    source_chunk_ids: number[];
+    steps: Array<{ title: string; description: string }>;
+  }>;
+
+  const playbooks: ExtractedPlaybook[] = extracted
+    .filter((p) => p.name && p.summary)
+    .map((p) => ({
+      name: p.name,
+      summary: p.summary,
+      useWhen: p.use_when ?? "",
+      avoidWhen: p.avoid_when ?? "",
+      expectedOutcomes: p.expected_outcomes ?? "",
+      domainTag: parseDomainTag(p.domain_tag),
+      confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)),
+      sourceChunkIds: p.source_chunk_ids ?? [],
+      steps: (p.steps ?? []).filter((s) => s.title),
+    }));
+
+  const persistedIds: number[] = [];
+  for (const item of playbooks) {
+    const [row] = await db.insert(playbooksTable).values({
+      name: item.name,
+      summary: item.summary,
+      useWhen: item.useWhen,
+      avoidWhen: item.avoidWhen,
+      expectedOutcomes: item.expectedOutcomes,
+      domainTag: item.domainTag,
+      confidenceScore: String(item.confidenceScore),
+      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      status: "candidate",
+    }).returning();
+    if (row) {
+      persistedIds.push(row.id);
+      for (let i = 0; i < item.steps.length; i++) {
+        await db.insert(playbookStepsTable).values({
+          playbookId: row.id,
+          stepOrder: i + 1,
+          stepTitle: item.steps[i].title,
+          stepDescription: item.steps[i].description,
+        });
       }
     }
-  } catch (err) {
-    logger.warn({ err }, "Failed to parse playbooks extraction");
   }
 
   logger.info({ docId: state.documentId, count: playbooks.length }, "Playbooks extracted");
-  return { extractedPlaybooks: playbooks };
+  return { extractedPlaybooks: playbooks, persistedPlaybookIds: persistedIds };
 }
 
 async function extractAntiPatternsNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
@@ -474,8 +513,6 @@ async function extractAntiPatternsNode(state: IngestionStateType): Promise<Parti
     .slice(0, 20)
     .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 400)}`)
     .join("\n---\n");
-
-  const antiPatterns: ExtractedAntiPattern[] = [];
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
@@ -492,126 +529,80 @@ Respond ONLY with valid JSON array, no markdown.`
     new HumanMessage(`Content:\n${contextText}`),
   ]), 2, "extract_anti_patterns");
 
-  try {
-    const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const extracted = JSON.parse(jsonMatch[0]) as Array<{
-        title: string;
-        description: string;
-        signals: string[];
-        domain_tag: string;
-        risk_level: string;
-        confidence_score: number;
-        source_chunk_ids: number[];
-      }>;
-      for (const a of extracted) {
-        if (a.title && a.description) {
-          const validRisk = ["high", "medium", "low"];
-          antiPatterns.push({
-            title: a.title,
-            description: a.description,
-            signals: a.signals ?? [],
-            domainTag: parseDomainTag(a.domain_tag),
-            riskLevel: (validRisk.includes(a.risk_level) ? a.risk_level : "medium") as "high" | "medium" | "low",
-            confidenceScore: Math.min(1, Math.max(0, a.confidence_score ?? 0.7)),
-            sourceChunkIds: a.source_chunk_ids ?? [],
-          });
-        }
-      }
-    }
-  } catch (err) {
-    logger.warn({ err }, "Failed to parse anti-patterns extraction");
+  const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error(`extract_anti_patterns: LLM returned non-JSON: ${text.slice(0, 200)}`);
+  const extracted = JSON.parse(jsonMatch[0]) as Array<{
+    title: string;
+    description: string;
+    signals: string[];
+    domain_tag: string;
+    risk_level: string;
+    confidence_score: number;
+    source_chunk_ids: number[];
+  }>;
+
+  const validRisk = ["high", "medium", "low"];
+  const antiPatterns: ExtractedAntiPattern[] = extracted
+    .filter((a) => a.title && a.description)
+    .map((a) => ({
+      title: a.title,
+      description: a.description,
+      signals: a.signals ?? [],
+      domainTag: parseDomainTag(a.domain_tag),
+      riskLevel: (validRisk.includes(a.risk_level) ? a.risk_level : "medium") as "high" | "medium" | "low",
+      confidenceScore: Math.min(1, Math.max(0, a.confidence_score ?? 0.7)),
+      sourceChunkIds: a.source_chunk_ids ?? [],
+    }));
+
+  const persistedIds: number[] = [];
+  for (const item of antiPatterns) {
+    const [row] = await db.insert(antiPatternsTable).values({
+      title: item.title,
+      description: item.description,
+      signalsJson: JSON.stringify(item.signals),
+      domainTag: item.domainTag,
+      riskLevel: item.riskLevel,
+      sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+      status: "candidate",
+    }).returning();
+    if (row) persistedIds.push(row.id);
   }
 
   logger.info({ docId: state.documentId, count: antiPatterns.length }, "Anti-patterns extracted");
-  return { extractedAntiPatterns: antiPatterns };
+  return { extractedAntiPatterns: antiPatterns, persistedAntiPatternIds: persistedIds };
 }
 
 
 async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
   const embedModel = createEmbeddings();
 
-  async function dedupePrinciples(items: ExtractedPrinciple[]) {
-    for (const item of items) {
-      const embeddingText = `${item.title} ${item.statement}`;
-      const [embedding] = await withRetry(() => embedModel.embedDocuments([embeddingText]), 2, "dedupe_embed_principle");
+  async function dedupeById<T extends { id: number }>(
+    table: "principles" | "rules" | "playbooks" | "anti_patterns",
+    candidateIds: number[],
+    embeddingTextFn: (row: T) => string,
+    mergeUpdateFn: (existingId: number, existingRow: { id: number; source_refs_json: string }, candidateRow: T) => Promise<void>,
+    fetchFn: (ids: number[]) => Promise<T[]>
+  ) {
+    if (candidateIds.length === 0) return;
+    const candidates = await fetchFn(candidateIds);
+
+    for (const candidate of candidates) {
+      const embText = embeddingTextFn(candidate);
+      const [embedding] = await withRetry(() => embedModel.embedDocuments([embText]), 2, `dedupe_embed_${table}`);
       const vec = `[${embedding.join(",")}]`;
 
       const existing = await pool.query<{
         id: number;
-        title: string;
-        source_count: number;
         source_refs_json: string;
-        confidence_score: string;
         embedding_str: string;
       }>(
-        `SELECT id, title, source_count, source_refs_json, confidence_score,
-         (embedding_vector::text) as embedding_str
-         FROM principles
-         WHERE embedding_vector IS NOT NULL
-         ORDER BY embedding_vector <=> $1::vector
+        `SELECT id, source_refs_json, (embedding_vector::text) as embedding_str
+         FROM ${table}
+         WHERE embedding_vector IS NOT NULL AND id != $1
+         ORDER BY embedding_vector <=> $2::vector
          LIMIT 5`,
-        [vec]
-      );
-
-      let merged = false;
-      for (const row of existing.rows) {
-        if (row.embedding_str) {
-          const existVec = row.embedding_str.slice(1, -1).split(",").map(Number);
-          const sim = cosineSimilarity(embedding, existVec);
-          if (sim >= DEDUPE_SIMILARITY_THRESHOLD) {
-            const existingRefs: unknown[] = JSON.parse(row.source_refs_json || "[]");
-            const newRefs = [...existingRefs, ...item.sourceChunkIds];
-            const newConf = Math.max(parseFloat(row.confidence_score || "0"), item.confidenceScore);
-            await db.update(principlesTable).set({
-              sourceCount: row.source_count + 1,
-              sourceRefsJson: JSON.stringify(newRefs),
-              confidenceScore: String(newConf),
-            }).where(eq(principlesTable.id, row.id));
-            merged = true;
-            logger.info({ id: row.id, sim }, "Principle deduplicated (merged)");
-            break;
-          }
-        }
-      }
-
-      if (!merged) {
-        const [inserted] = await db.insert(principlesTable).values({
-          title: item.title,
-          statement: item.statement,
-          explanation: item.explanation,
-          domainTag: item.domainTag,
-          confidenceScore: String(item.confidenceScore),
-          sourceCount: 1,
-          sourceRefsJson: JSON.stringify(item.sourceChunkIds),
-          status: "candidate",
-        }).returning();
-        if (inserted && embedding) {
-          await pool.query(
-            "UPDATE principles SET embedding_vector = $1::vector WHERE id = $2",
-            [vec, inserted.id]
-          );
-        }
-      }
-    }
-  }
-
-  async function dedupeRules(items: ExtractedRule[]) {
-    for (const item of items) {
-      const embeddingText = `${item.name} ${item.ifCondition} ${item.thenLogic}`;
-      const [embedding] = await withRetry(() => embedModel.embedDocuments([embeddingText]), 2, "dedupe_embed_rule");
-      const vec = `[${embedding.join(",")}]`;
-
-      const existing = await pool.query<{
-        id: number;
-        source_refs_json: string;
-        embedding_str: string;
-      }>(
-        `SELECT id, source_refs_json, (embedding_vector::text) as embedding_str
-         FROM rules WHERE embedding_vector IS NOT NULL
-         ORDER BY embedding_vector <=> $1::vector LIMIT 5`,
-        [vec]
+        [candidate.id, vec]
       );
 
       let merged = false;
@@ -619,157 +610,89 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
         if (row.embedding_str) {
           const existVec = row.embedding_str.slice(1, -1).split(",").map(Number);
           if (cosineSimilarity(embedding, existVec) >= DEDUPE_SIMILARITY_THRESHOLD) {
-            const existingRefs: unknown[] = JSON.parse(row.source_refs_json || "[]");
-            await db.update(rulesTable).set({
-              sourceRefsJson: JSON.stringify([...existingRefs, ...item.sourceChunkIds]),
-            }).where(eq(rulesTable.id, row.id));
+            await mergeUpdateFn(row.id, row, candidate);
+            await pool.query(`DELETE FROM ${table} WHERE id = $1`, [candidate.id]);
             merged = true;
+            logger.info({ table, existingId: row.id, candidateId: candidate.id }, "Deduplicated — merged into existing");
             break;
           }
         }
       }
 
       if (!merged) {
-        const [inserted] = await db.insert(rulesTable).values({
-          name: item.name,
-          ruleType: item.ruleType,
-          ifCondition: item.ifCondition,
-          thenLogic: item.thenLogic,
-          domainTag: item.domainTag,
-          confidenceScore: String(item.confidenceScore),
-          sourceRefsJson: JSON.stringify(item.sourceChunkIds),
-          status: "candidate",
-        }).returning();
-        if (inserted && embedding) {
-          await pool.query(
-            "UPDATE rules SET embedding_vector = $1::vector WHERE id = $2",
-            [vec, inserted.id]
-          );
-        }
+        await pool.query(
+          `UPDATE ${table} SET embedding_vector = $1::vector WHERE id = $2`,
+          [vec, candidate.id]
+        );
       }
     }
   }
 
-  async function dedupePlaybooks(items: ExtractedPlaybook[]) {
-    for (const item of items) {
-      const embeddingText = `${item.name} ${item.summary}`;
-      const [embedding] = await withRetry(() => embedModel.embedDocuments([embeddingText]), 2, "dedupe_embed_playbook");
-      const vec = `[${embedding.join(",")}]`;
-
-      const existing = await pool.query<{
-        id: number;
-        source_refs_json: string;
-        embedding_str: string;
-      }>(
-        `SELECT id, source_refs_json, (embedding_vector::text) as embedding_str
-         FROM playbooks WHERE embedding_vector IS NOT NULL
-         ORDER BY embedding_vector <=> $1::vector LIMIT 5`,
-        [vec]
+  await dedupeById<{ id: number; title: string; statement: string; sourceRefsJson: string; confidenceScore: string }>(
+    "principles",
+    state.persistedPrincipleIds,
+    (r) => `${r.title} ${r.statement}`,
+    async (existId, existRow, candidate) => {
+      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      const existingConf = await pool.query<{ confidence_score: string; source_count: number }>(
+        "SELECT confidence_score, source_count FROM principles WHERE id = $1", [existId]
       );
-
-      let merged = false;
-      for (const row of existing.rows) {
-        if (row.embedding_str) {
-          const existVec = row.embedding_str.slice(1, -1).split(",").map(Number);
-          if (cosineSimilarity(embedding, existVec) >= DEDUPE_SIMILARITY_THRESHOLD) {
-            const existingRefs: unknown[] = JSON.parse(row.source_refs_json || "[]");
-            await db.update(playbooksTable).set({
-              sourceRefsJson: JSON.stringify([...existingRefs, ...item.sourceChunkIds]),
-            }).where(eq(playbooksTable.id, row.id));
-            merged = true;
-            break;
-          }
-        }
-      }
-
-      if (!merged) {
-        const [inserted] = await db.insert(playbooksTable).values({
-          name: item.name,
-          summary: item.summary,
-          useWhen: item.useWhen,
-          avoidWhen: item.avoidWhen,
-          expectedOutcomes: item.expectedOutcomes,
-          domainTag: item.domainTag,
-          confidenceScore: String(item.confidenceScore),
-          sourceRefsJson: JSON.stringify(item.sourceChunkIds),
-          status: "candidate",
-        }).returning();
-        if (inserted) {
-          if (embedding) {
-            await pool.query(
-              "UPDATE playbooks SET embedding_vector = $1::vector WHERE id = $2",
-              [vec, inserted.id]
-            );
-          }
-          for (let i = 0; i < item.steps.length; i++) {
-            await db.insert(playbookStepsTable).values({
-              playbookId: inserted.id,
-              stepOrder: i + 1,
-              stepTitle: item.steps[i].title,
-              stepDescription: item.steps[i].description,
-            });
-          }
-        }
-      }
+      const existConf = parseFloat(existingConf.rows[0]?.confidence_score || "0");
+      const existCount = existingConf.rows[0]?.source_count ?? 0;
+      await db.update(principlesTable).set({
+        sourceCount: existCount + 1,
+        sourceRefsJson: JSON.stringify(refs),
+        confidenceScore: String(Math.max(existConf, parseFloat(candidate.confidenceScore || "0"))),
+      }).where(eq(principlesTable.id, existId));
+    },
+    async (ids) => {
+      const rows = await db.select().from(principlesTable).where(inArray(principlesTable.id, ids));
+      return rows.map((r) => ({ id: r.id, title: r.title ?? "", statement: r.statement ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]", confidenceScore: r.confidenceScore ?? "0.7" }));
     }
-  }
+  );
 
-  async function dedupeAntiPatterns(items: ExtractedAntiPattern[]) {
-    for (const item of items) {
-      const embeddingText = `${item.title} ${item.description}`;
-      const [embedding] = await withRetry(() => embedModel.embedDocuments([embeddingText]), 2, "dedupe_embed_ap");
-      const vec = `[${embedding.join(",")}]`;
-
-      const existing = await pool.query<{
-        id: number;
-        source_refs_json: string;
-        embedding_str: string;
-      }>(
-        `SELECT id, source_refs_json, (embedding_vector::text) as embedding_str
-         FROM anti_patterns WHERE embedding_vector IS NOT NULL
-         ORDER BY embedding_vector <=> $1::vector LIMIT 5`,
-        [vec]
-      );
-
-      let merged = false;
-      for (const row of existing.rows) {
-        if (row.embedding_str) {
-          const existVec = row.embedding_str.slice(1, -1).split(",").map(Number);
-          if (cosineSimilarity(embedding, existVec) >= DEDUPE_SIMILARITY_THRESHOLD) {
-            const existingRefs: unknown[] = JSON.parse(row.source_refs_json || "[]");
-            await db.update(antiPatternsTable).set({
-              sourceRefsJson: JSON.stringify([...existingRefs, ...item.sourceChunkIds]),
-            }).where(eq(antiPatternsTable.id, row.id));
-            merged = true;
-            break;
-          }
-        }
-      }
-
-      if (!merged) {
-        const [inserted] = await db.insert(antiPatternsTable).values({
-          title: item.title,
-          description: item.description,
-          signalsJson: JSON.stringify(item.signals),
-          domainTag: item.domainTag,
-          riskLevel: item.riskLevel,
-          sourceRefsJson: JSON.stringify(item.sourceChunkIds),
-          status: "candidate",
-        }).returning();
-        if (inserted && embedding) {
-          await pool.query(
-            "UPDATE anti_patterns SET embedding_vector = $1::vector WHERE id = $2",
-            [vec, inserted.id]
-          );
-        }
-      }
+  await dedupeById<{ id: number; name: string; ifCondition: string; thenLogic: string; sourceRefsJson: string }>(
+    "rules",
+    state.persistedRuleIds,
+    (r) => `${r.name} ${r.ifCondition} ${r.thenLogic}`,
+    async (existId, existRow, candidate) => {
+      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      await db.update(rulesTable).set({ sourceRefsJson: JSON.stringify(refs) }).where(eq(rulesTable.id, existId));
+    },
+    async (ids) => {
+      const rows = await db.select().from(rulesTable).where(inArray(rulesTable.id, ids));
+      return rows.map((r) => ({ id: r.id, name: r.name ?? "", ifCondition: r.ifCondition ?? "", thenLogic: r.thenLogic ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
     }
-  }
+  );
 
-  await dedupePrinciples(state.extractedPrinciples);
-  await dedupeRules(state.extractedRules);
-  await dedupePlaybooks(state.extractedPlaybooks);
-  await dedupeAntiPatterns(state.extractedAntiPatterns);
+  await dedupeById<{ id: number; name: string; summary: string; sourceRefsJson: string }>(
+    "playbooks",
+    state.persistedPlaybookIds,
+    (r) => `${r.name} ${r.summary}`,
+    async (existId, existRow, candidate) => {
+      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      await db.update(playbooksTable).set({ sourceRefsJson: JSON.stringify(refs) }).where(eq(playbooksTable.id, existId));
+      await db.delete(playbookStepsTable).where(eq(playbookStepsTable.playbookId, candidate.id));
+    },
+    async (ids) => {
+      const rows = await db.select().from(playbooksTable).where(inArray(playbooksTable.id, ids));
+      return rows.map((r) => ({ id: r.id, name: r.name ?? "", summary: r.summary ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
+    }
+  );
+
+  await dedupeById<{ id: number; title: string; description: string; sourceRefsJson: string }>(
+    "anti_patterns",
+    state.persistedAntiPatternIds,
+    (r) => `${r.title} ${r.description}`,
+    async (existId, existRow, candidate) => {
+      const refs = [...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")];
+      await db.update(antiPatternsTable).set({ sourceRefsJson: JSON.stringify(refs) }).where(eq(antiPatternsTable.id, existId));
+    },
+    async (ids) => {
+      const rows = await db.select().from(antiPatternsTable).where(inArray(antiPatternsTable.id, ids));
+      return rows.map((r) => ({ id: r.id, title: r.title ?? "", description: r.description ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
+    }
+  );
 
   logger.info({ docId: state.documentId }, "Deduplication complete");
   return {};

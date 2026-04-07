@@ -1198,6 +1198,7 @@ components:
           type: integer
         domainFilter:
           type: string
+          enum: [seo, geo, aeo, content, entity, general]
         useBrandContext:
           type: boolean
       required:
