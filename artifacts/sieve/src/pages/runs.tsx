@@ -4,7 +4,8 @@ import { useListRuns, ListRunsRunType } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { History, Search, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { History, AlertCircle, RefreshCw, Search, ArrowRight } from "lucide-react";
 import { Link } from "wouter";
 
 const RUN_TYPE_LABELS: Record<string, string> = {
@@ -21,7 +22,7 @@ export default function RunsHistory() {
     limit: 100,
   };
 
-  const { data: runs, isLoading: runsLoading, isError } = useListRuns(listParams);
+  const { data: runs, isLoading: runsLoading, isError, refetch } = useListRuns(listParams);
 
   return (
     <Layout>
@@ -52,9 +53,14 @@ export default function RunsHistory() {
 
         {isError ? (
           <Card className="border-destructive/30 bg-destructive/5">
-            <CardContent className="p-6 text-center text-destructive">
-              <p className="font-medium">Failed to load run history</p>
-              <p className="text-sm mt-1">Check API connectivity and try refreshing.</p>
+            <CardContent className="p-8 flex flex-col items-center gap-3 text-center">
+              <AlertCircle className="h-8 w-8 text-destructive" />
+              <p className="font-medium text-destructive">Failed to load run history</p>
+              <p className="text-sm text-muted-foreground">Check API connectivity and try again.</p>
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                Try Again
+              </Button>
             </CardContent>
           </Card>
         ) : (
@@ -101,7 +107,7 @@ export default function RunsHistory() {
                         </div>
                       </div>
                       <div className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity pr-4">
-                        <ExternalLink className="h-4 w-4" />
+                        <ArrowRight className="h-4 w-4" />
                       </div>
                     </Link>
                   ))}

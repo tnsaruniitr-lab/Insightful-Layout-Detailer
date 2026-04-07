@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { useBrandContext } from "@/hooks/use-brand-context";
 import {
@@ -96,6 +96,12 @@ export default function KnowledgeHub() {
       pollTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    return () => {
+      stopPolling();
+    };
+  }, [stopPolling]);
 
   const startPolling = useCallback(
     (docId: number) => {
