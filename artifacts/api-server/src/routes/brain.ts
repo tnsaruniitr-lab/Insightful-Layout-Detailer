@@ -522,18 +522,19 @@ router.post("/brain/backfill-canonical", async (req: Request, res: Response): Pr
     return;
   }
   try {
-    const tables = ["principles", "rules", "playbooks"];
+    const tableConfigs: Array<{ table: string; sourceCountClause: string }> = [
+      { table: "principles", sourceCountClause: "source_count >= 3 OR json_array_length(source_refs_json::json) >= 3" },
+      { table: "rules", sourceCountClause: "json_array_length(source_refs_json::json) >= 3" },
+      { table: "playbooks", sourceCountClause: "json_array_length(source_refs_json::json) >= 3" },
+    ];
     const results: Record<string, number> = {};
-    for (const table of tables) {
+    for (const { table, sourceCountClause } of tableConfigs) {
       const r = await pool.query<{ id: number }>(
         `UPDATE ${table} SET status = 'canonical'
          WHERE status != 'canonical'
            AND contested = false
            AND confidence_score::numeric > 0.95
-           AND (
-             (source_count IS NOT NULL AND source_count >= 3)
-             OR json_array_length(source_refs_json::json) >= 3
-           )
+           AND (${sourceCountClause})
          RETURNING id`
       );
       results[table] = r.rowCount ?? 0;

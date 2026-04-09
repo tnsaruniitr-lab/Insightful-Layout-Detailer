@@ -1,0 +1,33 @@
+Issues found ❌
+Issue 1 — Critical: Schema columns don't exist in Supabase
+The Drizzle schema has contested, conflict_pair_id, negation_embedding_vector defined — but they're not in Supabase. I queried directly:
+sqlSELECT column_name FROM information_schema.columns 
+WHERE table_name IN ('principles','rules','playbooks','anti_patterns')
+AND column_name IN ('contested','conflict_pair_id','negation_embedding_vector')
+Returns 0 rows. The migration hasn't run. This means:
+
+promoteToCanonicalIfEligible will fail at runtime — it queries contested = false on a column that doesn't exist
+The conflict detection code (lines 820, 803) will also fail when it tries to update negation_embedding_vector
+Every ingest will error at the dedup/merge node
+
+The migration needs to run before deploying this code to Replit.
+Issue 2 — Enrichment body update is incomplete (line 779)
+typescriptconst refs = [...new Set([...JSON.parse(row.source_refs_json || "[]"), ...JSON.parse("[]")])]
+The second JSON.parse("[]") is hardcoded empty — it should be JSON.parse(candidate.sourceRefsJson || "[]"). The enrichment merge correctly updates source_refs_json on the existing object but isn't adding the new document's source refs. The candidate's document ID gets lost. The source_count also isn't being bumped.
+Issue 3 — canonicalBoost weight in scoring formula is double-applied
+In scoring.ts line 154–160:
+typescriptconst canonicalBoost = c.isCanonical ? 0.05 : 0;
+const finalScore = ... + 0.05 * canonicalBoost;
+When isCanonical = true, canonicalBoost = 0.05, then 0.05 * 0.05 = 0.0025. The actual canonical boost to the final score is 0.0025, not 0.05. The signal is effectively dormant still. Should be either:
+
+const canonicalBoost = c.isCanonical ? 1 : 0 (binary flag, weight applied in formula), or
+0.05 * (c.isCanonical ? 1 : 0) directly in the formula
+
+Issue 4 — Backfill script missing
+Task 2 in the spec ("write a one-time migration script that runs the same promotion check against all existing objects") has no corresponding file in the repo. With 400+ existing objects that may already meet the criteria, this is the most immediate way to activate canonicalBoost in production. Without it, canonical promotion only fires on future ingests.
+Issue 5 — buildAuthorityMap uses trust_level not authority_tier
+The function queries trust_level from documents — which is the existing high/medium/low field, not a new authority_tier field. This is correct for now (step 2 authority tier doesn't exist yet) but the TIER_WEIGHTS are labelled high/medium/low rather than tier-1/tier-2/tier-3. When step 2 ships and adds authority_tier, you'll need to decide whether to keep using trust_level as a proxy or migrate to the new field. Worth flagging now so it's an explicit decision rather than an accidental one.
+
+Summary
+CheckStatuspromoteToCanonicalIfEligible logic✅ CorrectPromotion call sites✅ CorrectScoring formula weights✅ CorrectauthorityCorroboration formula✅ CorrectSchema definition (Drizzle)✅ CorrectSchema migration to Supabase❌ Not runEnrichment source_refs merge❌ Bug on line 779canonicalBoost double-weighting❌ Effective boost is 0.0025 not 0.05Backfill script❌ Missing
+Fix the migration and canonicalBoost weight before deploying — those two will cause silent failures and a scoring signal that still doesn't fire. The enrichment bug is lower urgency since enrichment is a secondary path.

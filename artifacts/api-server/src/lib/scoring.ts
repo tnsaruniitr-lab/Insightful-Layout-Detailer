@@ -151,7 +151,7 @@ function scoreCandidates(
     const distinctDocs = Math.max(1, new Set(docIds).size);
     const sourceWeight = Math.log(1 + distinctDocs) / Math.log(1 + 5);
     const authorityCorroboration = computeAuthorityCorroboration(docIds, authorityMap);
-    const canonicalBoost = c.isCanonical ? 0.05 : 0;
+    const canonicalBoost = c.isCanonical ? 1.0 : 0;
     const finalScore =
       0.55 * similarity +
       0.20 * c.confidence +

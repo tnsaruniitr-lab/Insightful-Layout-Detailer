@@ -698,17 +698,21 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
   await setProgress(state.documentId, "deduplicating");
   const embedModel = createEmbeddings();
 
+  const TABLES_WITH_SOURCE_COUNT = new Set(["principles"]);
+
   async function promoteToCanonicalIfEligible(table: string, id: number) {
+    const hasConfidence = table !== "anti_patterns";
+    if (!hasConfidence) return;
+    const sourceCountClause = TABLES_WITH_SOURCE_COUNT.has(table)
+      ? "source_count >= 3 OR json_array_length(source_refs_json::json) >= 3"
+      : "json_array_length(source_refs_json::json) >= 3";
     await pool.query(
       `UPDATE ${table} SET status = 'canonical'
        WHERE id = $1
          AND status != 'canonical'
          AND contested = false
          AND confidence_score::numeric > 0.95
-         AND (
-           source_count >= 3
-           OR json_array_length(source_refs_json::json) >= 3
-         )`,
+         AND (${sourceCountClause})`,
       [id]
     );
   }
@@ -776,9 +780,12 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
           const candidateConf = parseFloat(candConfRes.rows[0]?.conf ?? "0.7");
 
           if (candidateBody.length > existingBody.length * 1.3 && candidateConf >= existingConf) {
-            const refs = [...new Set([...JSON.parse(row.source_refs_json || "[]"), ...JSON.parse("[]")])];
+            const refs = [...new Set([...JSON.parse(row.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")])];
             await pool.query(
-              `UPDATE ${table} SET source_refs_json = $1 WHERE id = $2`,
+              `UPDATE ${table}
+               SET source_refs_json = $1,
+                   source_count = COALESCE(source_count, 0) + 1
+               WHERE id = $2`,
               [JSON.stringify(refs), row.id]
             );
             await pool.query(`DELETE FROM ${table} WHERE id = $1`, [candidate.id]);
