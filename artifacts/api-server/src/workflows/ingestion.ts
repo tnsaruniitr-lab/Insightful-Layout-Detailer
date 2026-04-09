@@ -747,7 +747,6 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
       );
 
       let merged = false;
-      let enriched = false;
 
       for (const row of existing.rows) {
         if (!row.embedding_str) continue;
@@ -763,40 +762,12 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
           break;
         }
 
-        if (sim >= ENRICHMENT_MIN_THRESHOLD && bodyTextFn) {
-          const candidateBody = bodyTextFn(candidate);
-          const existBodyRes = await pool.query<{ body: string; conf: string }>(
-            `SELECT COALESCE(statement, description, summary, '') AS body,
-                    COALESCE(confidence_score, '0.7') AS conf
-             FROM ${table} WHERE id = $1`,
-            [row.id]
-          );
-          const existingBody = existBodyRes.rows[0]?.body ?? "";
-          const existingConf = parseFloat(existBodyRes.rows[0]?.conf ?? "0.7");
-          const candConfRes = await pool.query<{ conf: string }>(
-            `SELECT COALESCE(confidence_score, '0.7') AS conf FROM ${table} WHERE id = $1`,
-            [candidate.id]
-          );
-          const candidateConf = parseFloat(candConfRes.rows[0]?.conf ?? "0.7");
-
-          if (candidateBody.length > existingBody.length * 1.3 && candidateConf >= existingConf) {
-            const refs = [...new Set([...JSON.parse(row.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")])];
-            await pool.query(
-              `UPDATE ${table}
-               SET source_refs_json = $1,
-                   source_count = COALESCE(source_count, 0) + 1
-               WHERE id = $2`,
-              [JSON.stringify(refs), row.id]
-            );
-            await pool.query(`DELETE FROM ${table} WHERE id = $1`, [candidate.id]);
-            enriched = true;
-            logger.info({ table, existingId: row.id, candidateId: candidate.id, sim }, "Enrichment detected — candidate body longer, merged source refs");
-            break;
-          }
+        if (sim >= ENRICHMENT_MIN_THRESHOLD) {
+          logger.info({ table, existingId: row.id, candidateId: candidate.id, sim }, "Near-duplicate detected — keeping both records, no enrichment");
         }
       }
 
-      if (!merged && !enriched) {
+      if (!merged) {
         await pool.query(
           `UPDATE ${table} SET embedding_vector = $1::vector WHERE id = $2`,
           [vec, candidate.id]
