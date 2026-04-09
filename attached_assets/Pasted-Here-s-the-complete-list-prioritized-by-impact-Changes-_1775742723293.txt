@@ -1,0 +1,73 @@
+Here's the complete list, prioritized by impact:
+
+Changes Required — artifacts/api-server/src/lib/llm.ts
+Change 1 — Switch ingestion model from GPT-4o to Claude Sonnet 4.6
+Line 53, change:
+typescript// FROM
+model: "gpt-4o",
+
+// TO
+model: "claude-sonnet-4-6",
+And refactor createStrongModel() to use the Anthropic SDK the same way invokeSynthesisModel() already does for Claude models. The OpenAI client can't call Claude endpoints.
+
+Changes Required — artifacts/api-server/src/workflows/ingestion.ts
+Change 2 — Anti-pattern prompt: add contrastive framing patterns
+Line 612, extend the derivable don'ts bullet to:
+- Derivable don'ts: if the content says "avoid X", "do not use Y", "Z will be ignored",
+  "A is not supported", "don't block with B" — extract as anti-pattern
+- Contrastive framing: "rewards X rather than Y" or "designed for X, not Y" → Y is an anti-pattern
+- Negated evaluation: "does not evaluate/support/apply to X" → assuming it does = anti-pattern
+- Outcome framing: "content that fails to X is likely to perform poorly" → failing X = anti-pattern
+- Implicit contrast: any sentence where a negative outcome is implied by the absence of a positive quality
+Change 3 — Playbook prompt: add prose procedure recognition
+After line 513, add:
+- A sentence where a single actor is given 3+ sequential actions using infinitive verbs
+  (e.g. "site owners should review...ensure...add...apply") is a playbook even without
+  numbered formatting — extract the actions as ordered steps
+- Advisory checklists ("owners should: [comma-separated actions]") are playbooks
+- Look for the pattern: actor + "should" + 3 or more verbs = playbook candidate
+Change 4 — Rules prompt: add specificity test for if_condition
+Currently the specificity gate rejects vague conditions but doesn't guide improvement. Add after line 423:
+- If an if_condition seems vague, sharpen it using surrounding context rather than skipping it
+- A good if_condition names a specific observable state: "if using 301 redirect for test variant"
+  not "if running a test"
+Change 5 — Principles prompt: add rule/principle disambiguation
+After line 347, add:
+- If a concept has a clear IF/THEN structure (a trigger and an action), it is a RULE not a principle
+- Do not extract "X pages are not eligible for Y feature" as a principle — it is a rule
+  with if_condition: "if page is classified as X" and then_logic: "then not eligible for Y"
+- A principle describes a universal truth; a rule describes a conditional action
+Change 6 — Bulk upload progress step names
+In bulk-upload-dialog.tsx, line 102-109, fix the STEPS map to match actual workflow step names:
+typescript// FROM
+const STEPS: Record<string, number> = {
+  extracting_text: 30,
+  chunking_document: 45,    // ❌ wrong
+  embedding_chunks: 60,
+  classifying_chunks: 70,   // ❌ wrong
+  extracting_intelligence: 80, // ❌ doesn't exist
+  deduplicating: 92,
+};
+
+// TO
+const STEPS: Record<string, number> = {
+  extracting_text: 30,
+  chunking: 45,             // ✅ matches setProgress()
+  embedding_chunks: 60,
+  classify_chunks: 70,      // ✅ matches setProgress()
+  extracting_principles: 75,
+  extracting_rules: 80,
+  extracting_playbooks: 85,
+  extracting_anti_patterns: 90,
+  deduplicating: 95,
+};
+Change 7 — Bulk upload: warn on silent file drop
+In bulk-upload-dialog.tsx, line 61, add user feedback when >15 files are selected:
+typescript// After the slice, add:
+if (Array.from(files).length > 15) {
+  // show a toast or set a state warning: "Only first 15 files selected"
+}
+
+Priority Order
+#ChangeFileImpactEffort1Switch to Claude Sonnetllm.ts🔴 HighMedium2Anti-pattern contrastive framingingestion.ts🔴 HighLow3Playbook prose procedure detectioningestion.ts🔴 HighLow4Bulk upload step namesbulk-upload-dialog.tsx🟡 MediumLow5Rule/principle disambiguationingestion.ts🟡 MediumLow6Rules specificity guidanceingestion.ts🟡 MediumLow7Bulk upload >15 file warningbulk-upload-dialog.tsx🟢 LowLow
+Changes 2, 3, 4, 5, 6, 7 are all prompt/string edits — no logic changes, deploy immediately. Change 1 requires a small refactor of createStrongModel() but the Anthropic SDK is already wired up in the same file.
