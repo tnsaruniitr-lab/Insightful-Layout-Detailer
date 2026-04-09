@@ -303,7 +303,7 @@ function avg(nums: number[]): number {
 // ── GET /brain/audit ───────────────────────────────────────────────────────
 
 router.get("/brain/audit", async (req: Request, res: Response): Promise<void> => {
-  const auditKey = req.headers["x-audit-key"];
+  const auditKey = req.headers["x-audit-key"] ?? req.query.key;
   if (!process.env.AUDIT_SECRET || auditKey !== process.env.AUDIT_SECRET) {
     res.status(401).json({ error: "Unauthorized" });
     return;
