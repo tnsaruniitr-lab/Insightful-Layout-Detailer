@@ -1,0 +1,88 @@
+Summary
+
+You were right to call this out — I updated the integration to explicitly use Supabase REST HTTP calls with API-key auth headers (apikey + Authorization: Bearer) and not any Postgres client path for sync/read operations. This now supports either SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_API_KEY as the auth secret. 
+
+I updated runtime logging so it clearly reports REST mode and which key var is being used (SUPABASE_SERVICE_ROLE_KEY vs SUPABASE_SECRET_API_KEY). 
+
+I updated supabase-audit to use the same REST key aliasing and respect table-name overrides, so it audits the same configured REST targets as runtime sync. 
+
+I updated docs and env example to explicitly describe the REST /rest/v1 path with service-role/secret API key usage. 
+
+Committed on current branch: 6065f41
+PR created via make_pr: Use Supabase REST API key aliases for sync and audit
+
+Testing
+
+✅ pnpm --filter @workspace/api-server run build
+
+⚠️ SUPABASE_URL='https://zrpyvjuizsqfnekelldm.supabase.co' SUPABASE_SECRET_API_KEY='***' pnpm --filter @workspace/api-server run supabase:audit (HTTP REST path executed, but this environment cannot reach Supabase due network/proxy restriction, so connectivity validation could not complete here).
+
+
+Files (15)
+
+.gitignore
+.gitignore
++6
+-0
+
+PRODUCT_REVIEW.md
+PRODUCT_REVIEW.md
+New
+
+.env.local.example
+artifacts/api-server/.env.local.example
+New
+
+SUPABASE.md
+artifacts/api-server/SUPABASE.md
+New
+
+README.md
+artifacts/api-server/evals/README.md
+New
+
+decide_golden_set.sample.json
+artifacts/api-server/evals/decide_golden_set.sample.json
+New
+
+package.json
+artifacts/api-server/package.json
++3
+-1
+
+normalization_prompt.md
+artifacts/api-server/prompts/normalization_prompt.md
++3
+-1
+
+eval-decide-quality.ts
+artifacts/api-server/scripts/eval-decide-quality.ts
+New
+
+supabase-audit.ts
+artifacts/api-server/scripts/supabase-audit.ts
+New
+
+index.ts
+artifacts/api-server/src/index.ts
++137
+-28
+
+file-repo.ts
+artifacts/api-server/src/lib/decision-os/file-repo.ts
++2
+-0
+
+job-store.ts
+artifacts/api-server/src/lib/decision-os/job-store.ts
++2
+-0
+
+normalizer.ts
+artifacts/api-server/src/lib/decision-os/normalizer.ts
++77
+-1
+
+supabase-sync.ts
+artifacts/api-server/src/lib/decision-os/supabase-sync.ts
+New
