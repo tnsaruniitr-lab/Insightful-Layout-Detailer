@@ -1,0 +1,26 @@
+Found it. The problem is right in the system prompt. Let me also check principles extraction:Ran 2 commandsRan 2 commandsNow I have everything I need. Here's the exact diagnosis:
+
+Why The Extraction Is Failing — Evidence From The Code
+The rules prompt says:
+"You extract diagnostic/scoring rules from marketing knowledge documents.
+A rule has an IF condition and THEN action/implication.
+Extract 1-5 rules from the content."
+The principles prompt says:
+"You extract marketing intelligence principles from knowledge documents.
+A principle is a universal truth about seo marketing that should guide strategy.
+Extract 1-5 principles from the provided content."
+Three concrete problems:
+1. Wrong framing for compliance/policy docs
+The A/B testing doc is a Google policy document — it contains technical compliance rules: "must use 302 not 301", "never show Googlebot different content". The prompt asks for "diagnostic/scoring rules from marketing knowledge documents." The LLM reads "marketing" and "diagnostic/scoring" and filters out compliance rules as not matching. It extracted definitional rules ("if user examines two variations → identify as A/B test") instead of the actionable policy rules.
+2. Cap of 1-5 is too low and no specificity gate
+The doc has 5+ distinct rules but the prompt says "Extract 1-5". With no specificity requirement on if_condition, the LLM fills the cap with vague definitions rather than concrete triggers. The skill already identifies this: "vague triggers like 'if running a test' pass unchecked."
+3. No content-type pre-assessment
+The LLM receives the doc cold with no instruction to first identify what type of document it is. A compliance/policy doc should trigger: "extract compliance rules, not strategy principles." Currently it treats every doc the same way.
+
+The fix — three targeted changes to the rules prompt:
+"You extract actionable rules from knowledge documents.
+Rules may be compliance requirements, technical requirements, or strategic guidelines.
+For compliance/policy content (Google guidelines, platform policies), 
+extract the specific DO/DON'T requirements as rules.
+if_condition must be a specific observable trigger — not a definition.
+Extract 1-8 rules. Reject vague if_conditions like 'if running a test'."
