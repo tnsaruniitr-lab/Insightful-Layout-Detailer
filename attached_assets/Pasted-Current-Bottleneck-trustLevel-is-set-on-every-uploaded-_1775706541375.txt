@@ -1,0 +1,59 @@
+Current Bottleneck
+trustLevel is set on every uploaded document (high | medium | low) but is never read during ingestion — meaning a scraped blog post produces identically-weighted brain objects as official Google documentation.
+Why This Is The Bottleneck
+
+documentsTable has a trustLevel column (high | medium | low) set at upload time. It exists specifically to signal source authority.
+extractTextNode in workflows/ingestion.ts loads the document row and reads doc.sourceType and doc.storagePath — but never doc.trustLevel. It falls off the edge.
+IngestionState has no trustLevel or docTrustLevel field — it was never threaded through the workflow.
+All four extraction nodes assign confidenceScore: Math.min(1, Math.max(0, p.confidence_score ?? 0.7)) — pure LLM-estimated value with no source authority adjustment.
+Confidence carries 20% weight in finalScore. Right now that 20% is entirely determined by how confidently the LLM phrases its extraction — not by how authoritative the source actually is. A high-trust Google documentation page and a low-trust random blog post produce objects with identical confidence weighting.
+The sourceWeight fix made document count matter. The next signal that's broken is document quality.
+
+Primary Layer
+extraction
+Exact Next Fix
+Thread doc.trustLevel through IngestionState and apply a trust multiplier to each extracted object's confidenceScore at persist time:
+high  → confidence × 1.00  (no change)
+medium → confidence × 0.85
+low   → confidence × 0.70
+Files / Modules To Change
+One file only: artifacts/api-server/src/workflows/ingestion.ts
+Step 1 — add docTrustLevel to IngestionState:
+typescriptdocTrustLevel: Annotation<"high" | "medium" | "low">({ 
+  value: (_prev, next) => next, 
+  default: () => "medium" as const 
+}),
+Step 2 — read it in extractTextNode after loading the doc:
+typescriptreturn { rawText, docTrustLevel: doc.trustLevel ?? "medium" };
+Step 3 — add a trust multiplier helper:
+typescriptconst TRUST_MULTIPLIERS: Record<"high" | "medium" | "low", number> = {
+  high: 1.00,
+  medium: 0.85,
+  low: 0.70,
+};
+function applyTrust(score: number, trust: "high" | "medium" | "low"): number {
+  return Math.min(1, score * TRUST_MULTIPLIERS[trust]);
+}
+Step 4 — apply it in all four extraction nodes at persist time:
+typescript// BEFORE (in all four nodes):
+confidenceScore: String(item.confidenceScore),
+
+// AFTER:
+confidenceScore: String(applyTrust(item.confidenceScore, state.docTrustLevel)),
+Implementation Notes
+Place TRUST_MULTIPLIERS and applyTrust near the top of the file alongside the other constants (DEDUPE_SIMILARITY_THRESHOLD, CHUNK_TARGET_TOKENS, etc.) — keep tunable values visible and grouped.
+The dedup merge logic in dedupeAndMergeNode already takes the max confidence of merged objects: Math.max(existConf, parseFloat(candidate.confidenceScore)). This is correct — if the same principle is confirmed by a high-trust source later, it will naturally upgrade to the higher confidence.
+No schema change needed. No migration needed. Only affects newly ingested documents going forward.
+How To Test
+
+Upload two documents with identical content — one marked trustLevel: high, one trustLevel: low. Ingest both. Query SELECT title, confidence_score FROM principles ORDER BY id DESC LIMIT 10. Objects from the high trust document should have confidence ~14% higher than those from the low trust document.
+Run a Knowledge QA query that retrieves objects from both documents. Check the scoring trace — high-trust objects should rank higher due to their confidence advantage, assuming similar similarity scores.
+Upload an official Google Search Quality Evaluator Guidelines PDF as trustLevel: high. Upload a random marketing blog post as trustLevel: low. Ingest both. The guidelines should produce objects with confidence_score meaningfully above the blog post objects.
+Verify the dedup merge behaviour: ingest the same content first as low trust, then as high trust. After dedup, the surviving object's confidence_score should reflect the higher high-trust value.
+
+Expected Improvement
+The confidence signal (20% of finalScore) now encodes both LLM certainty and source authority. Objects from authoritative sources will consistently rank above equally-similar objects from weak sources. This is the correct SEO/AEO behaviour — Google's own documentation should outrank a blog post's paraphrase of that documentation.
+Do Not Change Yet
+Extraction prompts — the quality of what gets extracted is a separate issue from how it's weighted. Fix trust-weighting first so you can see clearly in traces which objects are ranking high and why, then evaluate whether extraction quality is the next bottleneck.
+frequencyBonus — still inactive below 20 traces. Don't tune until you have enough usage data for it to activate naturally.
+Chunk size — CHUNK_TARGET_TOKENS = 400 is working. Don't adjust without evidence of retrieval failures caused by boundary issues.

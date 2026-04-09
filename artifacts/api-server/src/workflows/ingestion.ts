@@ -20,6 +20,16 @@ const CHUNK_TARGET_TOKENS = 400;
 const CHUNK_OVERLAP_TOKENS = 50;
 const EMBED_BATCH_SIZE = 100;
 
+const TRUST_MULTIPLIERS: Record<"high" | "medium" | "low", number> = {
+  high: 1.00,
+  medium: 0.85,
+  low: 0.70,
+};
+
+function applyTrust(score: number, trust: "high" | "medium" | "low"): number {
+  return Math.min(1, score * TRUST_MULTIPLIERS[trust]);
+}
+
 type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
 
 interface ChunkRecord {
@@ -85,6 +95,7 @@ const IngestionState = Annotation.Root({
   persistedRuleIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
   persistedPlaybookIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
   persistedAntiPatternIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
+  docTrustLevel: Annotation<"high" | "medium" | "low">({ value: (_prev, next) => next, default: () => "medium" as const }),
   status: Annotation<"processing" | "done" | "error">({ value: (_prev, next) => next, default: () => "processing" as const }),
   errorMessage: Annotation<string | null>({ value: (_prev, next) => next, default: () => null }),
 });
@@ -177,8 +188,9 @@ async function extractTextNode(state: IngestionStateType): Promise<Partial<Inges
     rawText = (fileBuffer as Buffer).toString("utf-8");
   }
 
-  logger.info({ docId: state.documentId, chars: rawText.length }, "Text extracted");
-  return { rawText };
+  const docTrustLevel = (doc.trustLevel ?? "medium") as "high" | "medium" | "low";
+  logger.info({ docId: state.documentId, chars: rawText.length, trustLevel: docTrustLevel }, "Text extracted");
+  return { rawText, docTrustLevel };
 }
 
 async function chunkDocumentNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
@@ -373,7 +385,7 @@ Respond ONLY with valid JSON array, no markdown.`
       statement: item.statement,
       explanation: item.explanation,
       domainTag: item.domainTag,
-      confidenceScore: String(item.confidenceScore),
+      confidenceScore: String(applyTrust(item.confidenceScore, state.docTrustLevel)),
       sourceCount: 1,
       sourceRefsJson: JSON.stringify([state.documentId]),
       status: "candidate",
@@ -381,7 +393,7 @@ Respond ONLY with valid JSON array, no markdown.`
     if (row) persistedIds.push(row.id);
   }
 
-  logger.info({ docId: state.documentId, count: principles.length }, "Principles extracted");
+  logger.info({ docId: state.documentId, count: principles.length, trustLevel: state.docTrustLevel }, "Principles extracted");
   return { extractedPrinciples: principles, persistedPrincipleIds: persistedIds };
 }
 
@@ -450,14 +462,14 @@ Respond ONLY with valid JSON array, no markdown.`
       ifCondition: item.ifCondition,
       thenLogic: item.thenLogic,
       domainTag: item.domainTag,
-      confidenceScore: String(item.confidenceScore),
+      confidenceScore: String(applyTrust(item.confidenceScore, state.docTrustLevel)),
       sourceRefsJson: JSON.stringify([state.documentId]),
       status: "candidate",
     }).returning();
     if (row) persistedIds.push(row.id);
   }
 
-  logger.info({ docId: state.documentId, count: rules.length }, "Rules extracted");
+  logger.info({ docId: state.documentId, count: rules.length, trustLevel: state.docTrustLevel }, "Rules extracted");
   return { extractedRules: rules, persistedRuleIds: persistedIds };
 }
 
@@ -529,7 +541,7 @@ Respond ONLY with valid JSON array, no markdown.`
       avoidWhen: item.avoidWhen,
       expectedOutcomes: item.expectedOutcomes,
       domainTag: item.domainTag,
-      confidenceScore: String(item.confidenceScore),
+      confidenceScore: String(applyTrust(item.confidenceScore, state.docTrustLevel)),
       sourceRefsJson: JSON.stringify([state.documentId]),
       status: "candidate",
     }).returning();
