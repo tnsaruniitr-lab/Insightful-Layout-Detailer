@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { fullSyncToSupabase } from "../lib/supabaseSync";
 import { eq, and, desc, type SQL } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
@@ -299,6 +300,26 @@ function avg(nums: number[]): number {
   if (nums.length === 0) return 0;
   return +(nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(4);
 }
+
+// ── POST /brain/sync ───────────────────────────────────────────────────────
+
+router.post("/brain/sync", async (req: Request, res: Response): Promise<void> => {
+  const auditKey = req.headers["x-audit-key"] ?? req.query.key;
+  if (!process.env.AUDIT_SECRET || auditKey !== process.env.AUDIT_SECRET) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const result = await fullSyncToSupabase();
+    if (result.skipped) {
+      res.status(503).json({ error: result.skipped });
+      return;
+    }
+    res.json({ ok: true, synced: result.synced });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 
 // ── GET /brain/audit ───────────────────────────────────────────────────────
 

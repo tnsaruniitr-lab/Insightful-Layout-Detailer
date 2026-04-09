@@ -1,4 +1,5 @@
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
+import { syncAfterIngestion } from "../lib/supabaseSync";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { db, pool } from "@workspace/db";
 import {
@@ -801,6 +802,7 @@ export async function runIngestionGraph(documentId: number): Promise<void> {
 
   try {
     await compiledGraph.invoke({ documentId });
+    await syncAfterIngestion(documentId);
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     logger.error({ err, documentId }, "Ingestion graph failed");
