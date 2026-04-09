@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { FileText, Upload, RefreshCw, AlertCircle, CheckCircle2, Clock, Database, Loader2 } from "lucide-react";
+import { FileText, Upload, RefreshCw, AlertCircle, CheckCircle2, Clock, Database, Loader2, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -71,6 +71,11 @@ export default function KnowledgeHub() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [pollingState, setPollingState] = useState<PollingState | null>(null);
   const [processingDocId, setProcessingDocId] = useState<number | null>(null);
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; title: string } | null>(null);
+  const [deleteMode, setDeleteMode] = useState<"cascade" | "shallow">("cascade");
+  const [impactData, setImpactData] = useState<{ willDelete: { total: number; principles: number; rules: number; playbooks: number; antiPatterns: number }; willUpdate: { total: number } } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -189,6 +194,39 @@ export default function KnowledgeHub() {
     } catch {
       setProcessingDocId(null);
       toast({ title: "Failed to start processing", variant: "destructive" });
+    }
+  };
+
+  const handleDeleteClick = async (doc: { id: number; title: string }) => {
+    setDeleteTarget(doc);
+    setDeleteMode("cascade");
+    setImpactData(null);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const res = await fetch(`${base}/api/documents/${doc.id}/impact`);
+      if (res.ok) setImpactData(await res.json());
+    } catch { /* impact stays null, still allow delete */ }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const res = await fetch(`${base}/api/documents/${deleteTarget.id}?cascade=${deleteMode === "cascade"}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      setDeleteTarget(null);
+      setImpactData(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/principles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rules"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/playbooks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/anti-patterns"] });
+      toast({ title: deleteMode === "cascade" ? "Document and brain objects deleted" : "Document deleted" });
+    } catch {
+      toast({ title: "Delete failed", variant: "destructive" });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -434,6 +472,15 @@ export default function KnowledgeHub() {
                             Process
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteClick({ id: doc.id, title: doc.title }); }}
+                          disabled={isDeleting}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   );
@@ -453,6 +500,71 @@ export default function KnowledgeHub() {
           </CardContent>
         </Card>
       </div>
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open && !isDeleting) { setDeleteTarget(null); setImpactData(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" /> Delete Document
+            </DialogTitle>
+            <DialogDescription>
+              Delete <span className="font-semibold text-foreground">"{deleteTarget?.title}"</span> from the knowledge base.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <button
+              type="button"
+              onClick={() => setDeleteMode("cascade")}
+              className={`w-full text-left p-4 rounded-lg border-2 transition-colors ${deleteMode === "cascade" ? "border-destructive bg-destructive/5" : "border-border hover:border-muted-foreground/40"}`}
+            >
+              <div className="font-semibold text-sm mb-1">Deep delete — remove extracted brain objects too</div>
+              {impactData ? (
+                <div className="text-xs text-muted-foreground space-y-0.5">
+                  <div>
+                    <span className="text-destructive font-medium">{impactData.willDelete.total} object{impactData.willDelete.total !== 1 ? "s" : ""} will be deleted</span>
+                    {impactData.willDelete.total > 0 && (
+                      <span className="ml-1">
+                        ({[
+                          impactData.willDelete.principles > 0 && `${impactData.willDelete.principles} principle${impactData.willDelete.principles !== 1 ? "s" : ""}`,
+                          impactData.willDelete.rules > 0 && `${impactData.willDelete.rules} rule${impactData.willDelete.rules !== 1 ? "s" : ""}`,
+                          impactData.willDelete.playbooks > 0 && `${impactData.willDelete.playbooks} playbook${impactData.willDelete.playbooks !== 1 ? "s" : ""}`,
+                          impactData.willDelete.antiPatterns > 0 && `${impactData.willDelete.antiPatterns} anti-pattern${impactData.willDelete.antiPatterns !== 1 ? "s" : ""}`,
+                        ].filter(Boolean).join(", ")})
+                      </span>
+                    )}
+                  </div>
+                  {impactData.willUpdate.total > 0 && (
+                    <div>{impactData.willUpdate.total} shared object{impactData.willUpdate.total !== 1 ? "s" : ""} will keep their other sources</div>
+                  )}
+                  {impactData.willDelete.total === 0 && impactData.willUpdate.total === 0 && (
+                    <div>No brain objects reference this document</div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">Calculating impact...</div>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDeleteMode("shallow")}
+              className={`w-full text-left p-4 rounded-lg border-2 transition-colors ${deleteMode === "shallow" ? "border-amber-500 bg-amber-50/50 dark:bg-amber-950/20" : "border-border hover:border-muted-foreground/40"}`}
+            >
+              <div className="font-semibold text-sm mb-1">Shallow delete — keep all extracted brain objects</div>
+              <div className="text-xs text-muted-foreground">Removes only the document and its chunks. All principles, rules, playbooks, and anti-patterns that were extracted from it are preserved.</div>
+            </button>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setDeleteTarget(null); setImpactData(null); }} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isDeleting}>
+              {isDeleting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Deleting...</> : "Confirm Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }

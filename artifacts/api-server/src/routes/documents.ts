@@ -3,7 +3,7 @@ import { eq, and, type SQL } from "drizzle-orm";
 import multer from "multer";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { documentsTable, documentChunksTable } from "@workspace/db";
+import { documentsTable, documentChunksTable, principlesTable, rulesTable, playbooksTable, antiPatternsTable } from "@workspace/db";
 import {
   ListDocumentsQueryParams,
   GetDocumentParams,
@@ -185,5 +185,90 @@ router.get(
     res.json(rows);
   }
 );
+
+function parseSourceRefs(json: string): number[] {
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? v.filter((n): n is number => typeof n === "number") : [];
+  } catch { return []; }
+}
+
+function calcImpact(rows: { id: number; sourceRefsJson: string }[], docId: number) {
+  let willDelete = 0, willUpdate = 0;
+  for (const row of rows) {
+    const refs = parseSourceRefs(row.sourceRefsJson);
+    if (!refs.includes(docId)) continue;
+    if (refs.length === 1) willDelete++; else willUpdate++;
+  }
+  return { willDelete, willUpdate };
+}
+
+router.get("/documents/:id/impact", async (req: Request, res: Response): Promise<void> => {
+  const parsed = GetDocumentParams.safeParse(req.params);
+  if (!parsed.success) { res.status(400).json({ error: "Invalid document id" }); return; }
+  const docId = parsed.data.id;
+  const [doc] = await db.select().from(documentsTable).where(eq(documentsTable.id, docId)).limit(1);
+  if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
+
+  const [principles, rules, playbooks, antiPatterns] = await Promise.all([
+    db.select({ id: principlesTable.id, sourceRefsJson: principlesTable.sourceRefsJson }).from(principlesTable),
+    db.select({ id: rulesTable.id, sourceRefsJson: rulesTable.sourceRefsJson }).from(rulesTable),
+    db.select({ id: playbooksTable.id, sourceRefsJson: playbooksTable.sourceRefsJson }).from(playbooksTable),
+    db.select({ id: antiPatternsTable.id, sourceRefsJson: antiPatternsTable.sourceRefsJson }).from(antiPatternsTable),
+  ]);
+
+  const pi = calcImpact(principles, docId);
+  const ri = calcImpact(rules, docId);
+  const pli = calcImpact(playbooks, docId);
+  const ai = calcImpact(antiPatterns, docId);
+
+  res.json({
+    docId,
+    willDelete: { principles: pi.willDelete, rules: ri.willDelete, playbooks: pli.willDelete, antiPatterns: ai.willDelete, total: pi.willDelete + ri.willDelete + pli.willDelete + ai.willDelete },
+    willUpdate: { principles: pi.willUpdate, rules: ri.willUpdate, playbooks: pli.willUpdate, antiPatterns: ai.willUpdate, total: pi.willUpdate + ri.willUpdate + pli.willUpdate + ai.willUpdate },
+  });
+});
+
+router.delete("/documents/:id", async (req: Request, res: Response): Promise<void> => {
+  const parsed = GetDocumentParams.safeParse(req.params);
+  if (!parsed.success) { res.status(400).json({ error: "Invalid document id" }); return; }
+  const cascade = req.query.cascade === "true";
+  const docId = parsed.data.id;
+
+  const [doc] = await db.select().from(documentsTable).where(eq(documentsTable.id, docId)).limit(1);
+  if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
+
+  if (cascade) {
+    const [principles, rules, playbooks, antiPatterns] = await Promise.all([
+      db.select({ id: principlesTable.id, sourceRefsJson: principlesTable.sourceRefsJson }).from(principlesTable),
+      db.select({ id: rulesTable.id, sourceRefsJson: rulesTable.sourceRefsJson }).from(rulesTable),
+      db.select({ id: playbooksTable.id, sourceRefsJson: playbooksTable.sourceRefsJson }).from(playbooksTable),
+      db.select({ id: antiPatternsTable.id, sourceRefsJson: antiPatternsTable.sourceRefsJson }).from(antiPatternsTable),
+    ]);
+
+    const processTable = async (rows: { id: number; sourceRefsJson: string }[], table: typeof principlesTable | typeof rulesTable | typeof playbooksTable | typeof antiPatternsTable) => {
+      for (const row of rows) {
+        const refs = parseSourceRefs(row.sourceRefsJson);
+        if (!refs.includes(docId)) continue;
+        if (refs.length === 1) {
+          await db.delete(table).where(eq(table.id, row.id));
+        } else {
+          await db.update(table).set({ sourceRefsJson: JSON.stringify(refs.filter((id) => id !== docId)) }).where(eq(table.id, row.id));
+        }
+      }
+    };
+
+    await Promise.all([
+      processTable(principles, principlesTable),
+      processTable(rules, rulesTable),
+      processTable(playbooks, playbooksTable),
+      processTable(antiPatterns, antiPatternsTable),
+    ]);
+  }
+
+  await db.delete(documentChunksTable).where(eq(documentChunksTable.documentId, docId));
+  await db.delete(documentsTable).where(eq(documentsTable.id, docId));
+  res.json({ deleted: true, cascade });
+});
 
 export default router;
