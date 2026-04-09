@@ -1,0 +1,24 @@
+What's Correct and Well-Reasoned
+The build order is now optimal. Canonical auto-promotion costing nothing but activating a dormant scoring signal is the right first move. Each step is independently deployable and independently useful — that's the right architecture for a feature sequence this size.
+The scoring formula rebalance is clean. Dropping similarity from 0.60 to 0.55 to make room for authorityCorroboration at 0.10 is proportionally defensible. The note about monitoring sourceWeight vs authorityCorroboration overlap is exactly the right instinct — in practice they'll correlate for Google docs but diverge for derivative content, which is where the tier weighting earns its value.
+Deferring entity/number signal for enrichment v2 is correct. Accepting the false-positive tradeoff on verbose rewrites is a conscious, documented decision. That's fine.
+
+Three Things To Nail In Implementation
+Step 1 — Canonical auto-promotion criteria needs one more gate.
+The criteria (3+ tier-1 sources, confidence > 0.95, no contested flag) are right but tier-1 doesn't exist yet when step 1 ships — that's step 2. So at step 1 deployment, no object will ever have 3+ tier-1 sources since the authority_tier field doesn't exist yet. The step 1 implementation needs a fallback condition that works before tier exists: promote to canonical if source_count >= 3 AND confidence > 0.95 AND contested = false. When step 2 ships, add the tier-1 condition as an additional fast path.
+Step 3 — authorityCorroboration formula needs to be defined precisely before coding.
+The plan describes it as "tier-weighted independent source count" but doesn't specify the exact calculation. Codex will invent something. Define it explicitly:
+authorityCorroboration = log(1 + Σ tier_weight(doc_i)) / log(1 + max_expected)
+
+where tier_weight: tier-1 = 3.0, tier-2 = 1.0, tier-3 = 0.33
+and max_expected = 10 (normalization cap)
+This produces 0→1 output, matches the other formula components, and encodes the tier math from the proposal exactly.
+Step 5 — negation embedding storage location needs to be explicit.
+The plan says "store in negation_embedding_vector column" but doesn't specify the migration. This needs to be added to principles, rules, playbooks, and anti_patterns — same vector dimension (1536) as embedding_vector. If this isn't specified, Codex will either skip it or put it somewhere wrong.
+
+One Remaining Open Question
+What happens to the 84 existing objects during the scoring formula rebalance in step 3?
+All existing objects have sourceWeight computed from the old sourceRefsJson document IDs. authorityCorroboration requires authority_tier on those documents, which comes from step 2. So at step 3 deployment, existing objects will have authorityCorroboration = 0 until the step 2 backfill runs. That's fine — just needs to be sequenced: run step 2 backfill → then deploy step 3 scoring formula. If step 3 deploys before backfill completes, every object scores as if it has no authoritative corroboration, which temporarily degrades retrieval quality.
+
+Verdict
+Ready to build in sequence. The three implementation notes above should go into the Codex prompt for each step to prevent the most likely misimplementations. Want me to create the 6 tasks in ClickUp now with the full spec for each step?
