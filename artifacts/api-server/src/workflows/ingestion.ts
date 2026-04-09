@@ -338,15 +338,17 @@ async function extractPrinciplesNode(state: IngestionStateType): Promise<Partial
 
     const response = await withRetry(() => strongModel.invoke([
       new SystemMessage(
-        `You extract marketing intelligence principles from knowledge documents.
-A principle is a universal truth about ${domain} marketing that should guide strategy.
-Extract 1-5 principles from the provided content.
+        `You extract intelligence principles from knowledge documents.
+A principle is a universal truth about ${domain} that should guide strategy — not a definition, not a description.
+Extract 1-8 principles from the provided content.
+For compliance/policy content (platform guidelines, technical specs), extract the core requirements as principles.
 Respond with a JSON array: [{title, statement, explanation, confidence_score, source_chunk_ids}]
 - title: short name (< 10 words)
-- statement: the core principle in 1-2 sentences
-- explanation: 2-4 sentence explanation with evidence
+- statement: the core principle in 1-2 sentences — must be actionable, not definitional
+- explanation: 2-4 sentence explanation with evidence from the content
 - confidence_score: 0.0 to 1.0
 - source_chunk_ids: array of chunk IDs that support this principle
+Skip vague statements like "X is important for Y" — extract specific, falsifiable truths.
 Respond ONLY with valid JSON array, no markdown.`
       ),
       new HumanMessage(`Domain: ${domain}\n\nContent:\n${contextText}`),
@@ -408,14 +410,18 @@ async function extractRulesNode(state: IngestionStateType): Promise<Partial<Inge
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
-      `You extract diagnostic/scoring rules from marketing knowledge documents.
-A rule has an IF condition and THEN action/implication.
-Extract 1-5 rules from the content.
+      `You extract actionable rules from knowledge documents.
+A rule has an IF condition (specific observable trigger) and THEN action/implication.
+Rules may be compliance requirements, technical requirements, or strategic guidelines.
+For compliance/policy content (Google guidelines, platform policies, technical specs), extract the specific DO/DON'T requirements as rules.
+Extract 1-8 rules from the content.
 Respond with a JSON array: [{name, rule_type, if_condition, then_logic, domain_tag, confidence_score, source_chunk_ids}]
 - rule_type: one of: diagnostic, mapping, scoring, warning
 - domain_tag: one of: seo, geo, aeo, content, entity, general
 - confidence_score: 0.0 to 1.0
 - source_chunk_ids: array of chunk IDs
+IMPORTANT: if_condition must be a specific observable trigger — not a definition or category.
+Reject vague conditions like "if running a test" or "if content exists". Use concrete specifics like "if using 301 redirect for A/B test variant" or "if Googlebot receives different content than users".
 Respond ONLY with valid JSON array, no markdown.`
     ),
     new HumanMessage(`Content:\n${contextText}`),
@@ -484,11 +490,13 @@ async function extractPlaybooksNode(state: IngestionStateType): Promise<Partial<
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
-      `You extract actionable marketing playbooks from knowledge documents.
-A playbook is a repeatable procedure for achieving a marketing outcome.
-Extract 0-3 playbooks from the content. Only extract if genuinely present.
+      `You extract actionable playbooks from knowledge documents.
+A playbook is a repeatable procedure for achieving a specific outcome — it may be a technical implementation process, a compliance workflow, or a strategic marketing procedure.
+Extract 0-3 playbooks from the content. Only extract if a genuine step-by-step process is present.
 Respond with a JSON array: [{name, summary, use_when, avoid_when, expected_outcomes, domain_tag, confidence_score, source_chunk_ids, steps}]
 - steps: array of {title, description} — the ordered execution steps (2-8 steps)
+- use_when: specific conditions that trigger this playbook (not vague like "when needed")
+- avoid_when: specific conditions where this playbook should not be used
 - domain_tag: one of: seo, geo, aeo, content, entity, general
 - confidence_score: 0.0 to 1.0
 Respond ONLY with valid JSON array, no markdown.`
@@ -573,12 +581,13 @@ async function extractAntiPatternsNode(state: IngestionStateType): Promise<Parti
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
-      `You extract anti-patterns from marketing knowledge documents.
-An anti-pattern is a common mistake or harmful practice in marketing.
+      `You extract anti-patterns from knowledge documents.
+An anti-pattern is a common mistake, violation, or harmful practice that produces negative outcomes.
+This includes technical anti-patterns (wrong redirect types, cloaking), compliance violations (against Google/platform policies), and strategic mistakes.
 Extract 0-4 anti-patterns from the content. Only extract if genuinely present.
 Respond with a JSON array: [{title, description, signals, domain_tag, risk_level, confidence_score, source_chunk_ids}]
-- signals: array of observable signs that this anti-pattern is occurring
-- risk_level: one of: high, medium, low
+- signals: array of specific, observable signs that this anti-pattern is occurring (not vague like "poor performance")
+- risk_level: one of: high, medium, low — base on severity of consequence
 - domain_tag: one of: seo, geo, aeo, content, entity, general
 - confidence_score: 0.0 to 1.0
 Respond ONLY with valid JSON array, no markdown.`
