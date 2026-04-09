@@ -43,7 +43,7 @@ export default function Dashboard() {
               ? "Loading brand context..."
               : brand
               ? `Overview of knowledge processing and analytical output for ${brand.name}.`
-              : "Overview of the Sieve intelligence engine."}
+              : "Overview of the Tryps AEO/GEO automation engine."}
           </p>
         </div>
 

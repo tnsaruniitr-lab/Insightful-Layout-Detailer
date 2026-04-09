@@ -38,9 +38,12 @@ export function Layout({ children }: LayoutProps) {
     <div className="flex h-screen overflow-hidden bg-background">
       <aside className="w-64 border-r border-sidebar-border bg-sidebar flex flex-col">
         <div className="h-16 flex items-center justify-between px-6 border-b border-sidebar-border">
-          <div className="flex items-center gap-2 text-sidebar-primary font-bold text-xl tracking-tight font-mono">
-            <BrainCircuit className="h-6 w-6" />
-            <span>SIEVE</span>
+          <div className="flex flex-col leading-tight text-sidebar-primary">
+            <div className="flex items-center gap-2 font-bold text-lg tracking-tight font-mono">
+              <BrainCircuit className="h-5 w-5 shrink-0" />
+              <span>Tryps</span>
+            </div>
+            <span className="text-[10px] font-medium text-sidebar-primary/60 tracking-widest uppercase pl-7">AEO / GEO Automation</span>
           </div>
           <div className="flex items-center justify-center">
             {isError || health?.status !== "ok" ? (
