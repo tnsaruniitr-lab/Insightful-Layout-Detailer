@@ -1,0 +1,27 @@
+The revised build order is better than the original. Here's my honest evaluation of each decision and the overall sequencing:
+
+What's Right
+Canonical auto-promotion first is correct. It's the highest-ROI change with the lowest risk — a condition check added to the existing dedup merge function, no schema change, no new UI. It activates a scoring signal that's been dormant since day one. Doing it before the authority tier work means the first real-world test of canonical promotion happens on existing data, which gives you signal before you've complicated the scoring formula with tier weighting.
+Separating steps 2 and 3 is correct. Authority tier schema + upload UI is independent of the scoring formula change. Shipping tier as a data field first lets you backfill and validate the tier assignments on existing docs before you wire the scoring formula to depend on them. If you merged steps 2 and 3, you'd be scoring against tiers you haven't validated yet.
+Conflict detection as background job before UI is correct. The point about SEO/AEO conflicts being genuinely ambiguous is fair — no threshold will make them deterministic — but that's an argument for building the UI eventually, not for skipping the background validation phase. You need to see what the detector actually flags on your real corpus before you show it to analysts. One week of background logging is not a long delay and prevents building a UI around a signal that turns out to be 80% noise.
+
+What Still Has Issues
+Step 4 — Enrichment detection threshold at 0.88 is right, but the trigger condition is still fragile.
+The combined feedback agreed on 0.88 as the threshold for the enrichment check path but deferred the entity/number/technical term signal as "nice-to-have." That deferral is fine for now, but it means the enrichment check will still false-positive on verbose rewrites of the same content. You're accepting that tradeoff consciously which is fine — just worth flagging that the first version of enrichment detection will occasionally update a canonical body with a worse but longer version. The audit trail from keeping the original source_refs_json intact mitigates this since you can always trace what happened.
+Step 5 — Conflict detection scope is missing one constraint.
+Domain-tag scoping is correct. But there's a second constraint that should be added: only run conflict detection between objects with the same rule_type or between principles and principles. A diagnostic rule can't conflict with a warning rule in any meaningful operational sense — they're answering different questions. Adding rule_type matching as a second scope constraint alongside domain_tag will cut the comparison space further and improve precision before you even get to threshold tuning.
+The negation-embedding approach needs a practical cap.
+Pre-computing the negation embedding once per object at ingest and caching it is the right call — it eliminates the per-comparison cost. But the proposal doesn't specify where these negation embeddings are stored. Adding a negation_embedding_vector column to principles and rules is the right place — it keeps everything in one place, stays within your existing pgvector setup, and the nearest-neighbour query already works. Worth making that explicit in the implementation spec so Codex doesn't invent a separate cache.
+
+One Gap Still Not Addressed
+The frequencyBonus replacement in step 3 leaves a timing problem.
+frequencyBonus is currently disabled until 20 traces. When you replace it with authorityCorroboration, that 20-trace gate disappears — which is correct, authorityCorroboration should fire immediately. But the scoring formula also has a 0.05 canonicalBoost that only fires when status = 'canonical'. After step 1 (canonical auto-promotion), some objects will start hitting canonical status. After step 3 (scoring update), authorityCorroboration fires. But the formula weights are currently:
+0.6 × similarity
+0.2 × confidence  
+0.1 × sourceWeight
+0.05 × frequencyBonus  ← being replaced
+0.05 × canonicalBoost
+When you replace frequencyBonus with authorityCorroboration, you need to decide the weight. If it stays at 0.05, you're giving tier-weighted corroboration the same weight as canonical status, which seems low given what corroboration actually signals. Worth having an explicit conversation about whether authorityCorroboration should be 0.1 and canonicalBoost reduced to 0.05, or some other rebalancing. The current formula weights were set before any of these signals existed.
+
+Overall Verdict
+The revised build order is sound and executable. The decisions adopted from the feedback are all correct. The two refinements worth adding before you start building are the rule_type scoping for conflict detection and the explicit decision on scoring weight rebalancing in step 3. Everything else is ready to implement in sequence.
