@@ -13,6 +13,7 @@ import {
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { fireAndForget } from "../lib/jobRunner";
+import { deleteFromSupabase } from "../lib/supabaseSync";
 import { classifySourceAuthority, tierToTrustLevel } from "../lib/sourceClassifier";
 
 type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
@@ -267,10 +268,12 @@ router.post("/documents/bulk-delete", async (req: Request, res: Response): Promi
   ]);
 
   const docIdSet = new Set(docIds);
+  const deletedBrainIds: Record<string, number[]> = { principles: [], rules: [], playbooks: [], anti_patterns: [] };
 
   const processBrainTable = async (
     rows: { id: number; sourceRefsJson: string }[],
-    table: typeof principlesTable | typeof rulesTable | typeof playbooksTable | typeof antiPatternsTable
+    table: typeof principlesTable | typeof rulesTable | typeof playbooksTable | typeof antiPatternsTable,
+    tableKey: keyof typeof deletedBrainIds
   ) => {
     for (const row of rows) {
       const refs = parseSourceRefs(row.sourceRefsJson);
@@ -278,6 +281,7 @@ router.post("/documents/bulk-delete", async (req: Request, res: Response): Promi
       if (remaining.length === refs.length) continue;
       if (remaining.length === 0) {
         await db.delete(table).where(eq(table.id, row.id));
+        deletedBrainIds[tableKey].push(row.id);
       } else {
         await db.update(table).set({ sourceRefsJson: JSON.stringify(remaining) }).where(eq(table.id, row.id));
       }
@@ -285,14 +289,24 @@ router.post("/documents/bulk-delete", async (req: Request, res: Response): Promi
   };
 
   await Promise.all([
-    processBrainTable(principles, principlesTable),
-    processBrainTable(rules, rulesTable),
-    processBrainTable(playbooks, playbooksTable),
-    processBrainTable(antiPatterns, antiPatternsTable),
+    processBrainTable(principles, principlesTable, "principles"),
+    processBrainTable(rules, rulesTable, "rules"),
+    processBrainTable(playbooks, playbooksTable, "playbooks"),
+    processBrainTable(antiPatterns, antiPatternsTable, "anti_patterns"),
   ]);
 
   await db.delete(documentChunksTable).where(inArray(documentChunksTable.documentId, docIds));
   await db.delete(documentsTable).where(inArray(documentsTable.id, docIds));
+
+  fireAndForget(async () => {
+    await Promise.all([
+      deleteFromSupabase("documents", docIds),
+      deleteFromSupabase("principles", deletedBrainIds.principles),
+      deleteFromSupabase("rules", deletedBrainIds.rules),
+      deleteFromSupabase("playbooks", deletedBrainIds.playbooks),
+      deleteFromSupabase("anti_patterns", deletedBrainIds.anti_patterns),
+    ]);
+  });
 
   res.json({ deleted: docIds.length });
 });
@@ -306,6 +320,8 @@ router.delete("/documents/:id", async (req: Request, res: Response): Promise<voi
   const [doc] = await db.select().from(documentsTable).where(eq(documentsTable.id, docId)).limit(1);
   if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
 
+  const deletedBrainIds: Record<string, number[]> = { principles: [], rules: [], playbooks: [], anti_patterns: [] };
+
   if (cascade) {
     const [principles, rules, playbooks, antiPatterns] = await Promise.all([
       db.select({ id: principlesTable.id, sourceRefsJson: principlesTable.sourceRefsJson }).from(principlesTable),
@@ -314,12 +330,13 @@ router.delete("/documents/:id", async (req: Request, res: Response): Promise<voi
       db.select({ id: antiPatternsTable.id, sourceRefsJson: antiPatternsTable.sourceRefsJson }).from(antiPatternsTable),
     ]);
 
-    const processTable = async (rows: { id: number; sourceRefsJson: string }[], table: typeof principlesTable | typeof rulesTable | typeof playbooksTable | typeof antiPatternsTable) => {
+    const processTable = async (rows: { id: number; sourceRefsJson: string }[], table: typeof principlesTable | typeof rulesTable | typeof playbooksTable | typeof antiPatternsTable, tableKey: keyof typeof deletedBrainIds) => {
       for (const row of rows) {
         const refs = parseSourceRefs(row.sourceRefsJson);
         if (!refs.includes(docId)) continue;
         if (refs.length === 1) {
           await db.delete(table).where(eq(table.id, row.id));
+          deletedBrainIds[tableKey].push(row.id);
         } else {
           await db.update(table).set({ sourceRefsJson: JSON.stringify(refs.filter((id) => id !== docId)) }).where(eq(table.id, row.id));
         }
@@ -327,15 +344,26 @@ router.delete("/documents/:id", async (req: Request, res: Response): Promise<voi
     };
 
     await Promise.all([
-      processTable(principles, principlesTable),
-      processTable(rules, rulesTable),
-      processTable(playbooks, playbooksTable),
-      processTable(antiPatterns, antiPatternsTable),
+      processTable(principles, principlesTable, "principles"),
+      processTable(rules, rulesTable, "rules"),
+      processTable(playbooks, playbooksTable, "playbooks"),
+      processTable(antiPatterns, antiPatternsTable, "anti_patterns"),
     ]);
   }
 
   await db.delete(documentChunksTable).where(eq(documentChunksTable.documentId, docId));
   await db.delete(documentsTable).where(eq(documentsTable.id, docId));
+
+  fireAndForget(async () => {
+    await Promise.all([
+      deleteFromSupabase("documents", [docId]),
+      deleteFromSupabase("principles", deletedBrainIds.principles),
+      deleteFromSupabase("rules", deletedBrainIds.rules),
+      deleteFromSupabase("playbooks", deletedBrainIds.playbooks),
+      deleteFromSupabase("anti_patterns", deletedBrainIds.anti_patterns),
+    ]);
+  });
+
   res.json({ deleted: true, cascade });
 });
 
