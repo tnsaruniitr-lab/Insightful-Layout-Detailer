@@ -1,0 +1,33 @@
+This is a well-designed proposal. My honest assessment layer by layer:
+
+Layer 1 — Document Authority Tier
+Verdict: High value, right priority.
+The corroboration problem I flagged is real — only 3 multi-source objects despite 84 documents. The root cause isn't lack of overlap, it's that overlap isn't being rewarded meaningfully. frequencyBonus is currently disabled until 20 traces anyway, so you're scoring on a broken signal. Replacing it with authorityCorroboration fixes a live gap in the formula immediately.
+One concern: auto-detection of authority tier at upload time is unreliable. The LLM looking at "domain signals, citation density, content type" will misclassify consistently. Google Search Central docs would get tier-1 correctly, but anything from an agency or blog is ambiguous — high citation density doesn't equal authority. I'd recommend auto-detection as a suggested default that the analyst can override at upload time, not as a definitive assignment. Manual override matters here.
+The tier math (3 tier-3 = 1 tier-2, 1 tier-1 outweighs any tier-3) is clean and defensible.
+
+Layer 2 — Enrichment Detection in Dedup
+Verdict: Correct fix, but the trigger condition needs tightening.
+"Substantially longer body + equal or higher confidence" is a reasonable heuristic but it has an edge case: a longer body isn't always richer — it could be more verbose with the same information. A better second signal would be: does the new body contain named entities, specific numbers, or technical terms not present in the existing body? If yes → enrichment candidate. If it's just longer prose → standard merge.
+Also worth noting: the current dedup runs at 0.92 cosine threshold. At that threshold, two objects are nearly identical. If the new body is substantially longer, it may not even be hitting 0.92 in the first place — it would be stored as a new independent object rather than triggering dedup at all. You may need to lower the comparison threshold slightly (say 0.88) specifically for the enrichment check to catch this pattern.
+
+Layer 3 — Conflict Detection
+Verdict: Architecturally sound, the hard part is the detection signal.
+Negation pattern matching ("always" vs "never", "must" vs "avoid") catches explicit contradictions but misses implicit ones — Google's documentation style rarely uses absolutes. The embedding-of-negation approach is smarter but expensive: you're embedding a synthetic negation of every new object against all existing objects at ingest time. With 400+ objects today and growing, that's n embedding calls per ingest.
+Practical suggestion: run conflict detection only within the same domain_tag. A rule tagged aeo can't conflict with a rule tagged seo in any meaningful way. That reduces the comparison space significantly.
+The contested: true flag + conflict_pair_id + exclusion from brand application is exactly right. Don't delete, don't auto-resolve, quarantine and surface for human judgment.
+
+Layer 4 — Conflict Review UI
+Verdict: Essential but dependent on Layer 3 having good precision.
+If Layer 3 has false positives — flags non-conflicts as contested — the review UI becomes noise and analysts will stop using it. The resolution options (keep one / context-dependent / escalate) are the right three options. The "context-dependent" resolution is particularly important because many apparent conflicts in SEO/AEO are genuinely conditional — "always use canonical" vs "don't use canonical on paginated content" aren't contradictions, they're different contexts.
+One addition worth adding: when an analyst resolves a conflict as context-dependent, the system should capture the distinguishing condition as a structured field — not a free-text note. That condition becomes a new rule in the brain: "if [context A] → apply principle X, if [context B] → apply principle Y."
+
+Build Order Assessment
+The proposed order is correct. One refinement:
+Between Layer 1 and Layer 2, add a schema migration that backfills authority_tier on all existing 84 documents as tier_2 by default (conservative estimate), then let analysts correct the Google Search Central docs to tier_1. That gives the new scoring formula something to work with immediately without waiting for new uploads.
+Layer 3 before Layer 4 is non-negotiable — don't build the review UI until you've validated that conflict detection has acceptable precision on your actual corpus. Run it as a background job for a week, log what it would have flagged, review manually, tune the thresholds, then build the UI.
+
+One Thing Missing From The Proposal
+Canonical promotion is still manual and never happens.
+119 rules, 1 canonical. This is the single biggest scoring gap right now — canonicalBoost (0.05) never fires. A rule that's been corroborated by 3+ tier-1 sources with confidence > 0.95 and no contested flag should auto-promote to canonical. That's a 5-line addition to the dedup merge function and would immediately activate a scoring signal that's been dormant since day one.
+Worth adding as a sub-step within Layer 1 since you're already touching the scoring formula.
