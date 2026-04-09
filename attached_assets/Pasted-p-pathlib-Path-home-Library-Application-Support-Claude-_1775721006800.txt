@@ -1,0 +1,60 @@
+p = pathlib.Path.home() / 'Library/Application Support/Claude/claude_desktop_config.json'
+c = json.loads(p.read_text())
+c['mcpServers']['postgres']['env'] = {'NODE_TLS_REJECT_UNAUTHORIZED': '0'}
+p.write_text(json.dumps(c, indent=2))
+print('Saved')
+"
+Saved
+arunsharma@Aruns-MacBook-Pro ~ % tail -3 ~/Library/Logs/Claude/mcp-server-postgres.log
+2026-04-09T07:46:16.869Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+2026-04-09T07:46:20.796Z [postgres] [info] Message from client: {"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT 1;"}},"jsonrpc":"2.0","id":4} { metadata: undefined }
+2026-04-09T07:46:22.472Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":4,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+arunsharma@Aruns-MacBook-Pro ~ % python3 -c "
+import json, pathlib
+p = pathlib.Path.home() / 'Library/Application Support/Claude/claude_desktop_config.json'
+c = json.loads(p.read_text())
+print('env:', c['mcpServers']['postgres'].get('env'))
+print('url:', c['mcpServers']['postgres']['args'][2])
+"
+env: {'NODE_TLS_REJECT_UNAUTHORIZED': '0'}
+url: postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require
+arunsharma@Aruns-MacBook-Pro ~ % tail -3 ~/Library/Logs/Claude/mcp-server-postgres.log
+2026-04-09T07:47:40.303Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+2026-04-09T07:47:42.838Z [postgres] [info] Message from client: {"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT 1;"}},"jsonrpc":"2.0","id":4} { metadata: undefined }
+2026-04-09T07:47:44.592Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":4,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+arunsharma@Aruns-MacBook-Pro ~ % cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
+{
+  "preferences": {
+    "coworkWebSearchEnabled": true,
+    "ccdScheduledTasksEnabled": true,
+    "coworkScheduledTasksEnabled": false,
+    "sidebarMode": "chat"
+  },
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
+      ],
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+      }
+    }
+  }
+}%                                                                              arunsharma@Aruns-MacBook-Pro ~ % python3 -c "
+import json, pathlib
+p = pathlib.Path.home() / 'Library/Application Support/Claude/claude_desktop_config.json'
+c = json.loads(p.read_text())
+c['mcpServers']['postgres']['args'][2] = 'postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=no-verify'
+del c['mcpServers']['postgres']['env']
+p.write_text(json.dumps(c, indent=2))
+print('Saved:', c['mcpServers']['postgres']['args'][2])
+"
+Saved: postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=no-verify
+arunsharma@Aruns-MacBook-Pro ~ % ps aux | grep postgres | grep -v grep
+arunsharma       20736   0.0  0.4 420266672  32464   ??  S     2:49PM   0:00.21 node /Users/arunsharma/.npm/_npx/cd1ce99963b5e8b1/node_modules/.bin/mcp-server-postgres postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=no-verify
+arunsharma       20715   0.0  0.5 410086880  38288   ??  S     2:49PM   0:01.21 npm exec @modelcontextprotocol/server-postgres postgresql://postgres.aldraxqsqeywluohskhs:***@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=no-verify    
+arunsharma       20714   0.0  0.0 408495760    352   ??  S     2:49PM   0:00.00 /Applications/Claude.app/Contents/Helpers/disclaimer /Users/arunsharma/.nvm/versions/node/v20.20.0/bin/npx -y @modelcontextprotocol/server-postgres postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=no-verify
+arunsharma@Aruns-MacBook-Pro ~ % 
