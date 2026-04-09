@@ -331,10 +331,12 @@ async function extractPrinciplesNode(state: IngestionStateType): Promise<Partial
   const principles: ExtractedPrinciple[] = [];
 
   for (const [domain, chunks] of domainGroups) {
-    const contextText = chunks
-      .slice(0, 15)
-      .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 500)}`)
-      .join("\n---\n");
+    const contextText = chunks.length === 1
+      ? `[chunk_id:${chunks[0].id}] ${chunks[0].chunkText}`
+      : chunks
+          .slice(0, 15)
+          .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 1500)}`)
+          .join("\n---\n");
 
     const response = await withRetry(() => strongModel.invoke([
       new SystemMessage(
@@ -348,7 +350,7 @@ Respond with a JSON array: [{title, statement, explanation, confidence_score, so
 - explanation: 2-4 sentence explanation with evidence from the content
 - confidence_score: 0.0 to 1.0
 - source_chunk_ids: array of chunk IDs that support this principle
-Skip vague statements like "X is important for Y" — extract specific, falsifiable truths.
+If you find vague statements like "X is important for Y", use the surrounding context to sharpen them into specific, falsifiable truths rather than skipping them.
 Respond ONLY with valid JSON array, no markdown.`
       ),
       new HumanMessage(`Domain: ${domain}\n\nContent:\n${contextText}`),
@@ -403,10 +405,12 @@ Respond ONLY with valid JSON array, no markdown.`
 async function extractRulesNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
   await setProgress(state.documentId, "extracting_rules");
   const strongModel = createStrongModel();
-  const contextText = state.chunks
-    .slice(0, 20)
-    .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 400)}`)
-    .join("\n---\n");
+  const contextText = state.chunks.length === 1
+    ? `[chunk_id:${state.chunks[0].id}] ${state.chunks[0].chunkText}`
+    : state.chunks
+        .slice(0, 20)
+        .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 1500)}`)
+        .join("\n---\n");
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
@@ -421,7 +425,7 @@ Respond with a JSON array: [{name, rule_type, if_condition, then_logic, domain_t
 - confidence_score: 0.0 to 1.0
 - source_chunk_ids: array of chunk IDs
 IMPORTANT: if_condition must be a specific observable trigger — not a definition or category.
-Reject vague conditions like "if running a test" or "if content exists". Use concrete specifics like "if using 301 redirect for A/B test variant" or "if Googlebot receives different content than users".
+If you find vague conditions like "if running a test" or "if content exists", use the surrounding context to sharpen them into concrete specifics (e.g. "if using 301 redirect for A/B test variant", "if Googlebot receives different content than users") rather than skipping them.
 Respond ONLY with valid JSON array, no markdown.`
     ),
     new HumanMessage(`Content:\n${contextText}`),
@@ -483,10 +487,12 @@ Respond ONLY with valid JSON array, no markdown.`
 async function extractPlaybooksNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
   await setProgress(state.documentId, "extracting_playbooks");
   const strongModel = createStrongModel();
-  const contextText = state.chunks
-    .slice(0, 20)
-    .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 400)}`)
-    .join("\n---\n");
+  const contextText = state.chunks.length === 1
+    ? `[chunk_id:${state.chunks[0].id}] ${state.chunks[0].chunkText}`
+    : state.chunks
+        .slice(0, 20)
+        .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 1500)}`)
+        .join("\n---\n");
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
@@ -574,10 +580,12 @@ Respond ONLY with valid JSON array, no markdown.`
 async function extractAntiPatternsNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
   await setProgress(state.documentId, "extracting_anti_patterns");
   const strongModel = createStrongModel();
-  const contextText = state.chunks
-    .slice(0, 20)
-    .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 400)}`)
-    .join("\n---\n");
+  const contextText = state.chunks.length === 1
+    ? `[chunk_id:${state.chunks[0].id}] ${state.chunks[0].chunkText}`
+    : state.chunks
+        .slice(0, 20)
+        .map((c) => `[chunk_id:${c.id}] ${c.chunkText.slice(0, 1500)}`)
+        .join("\n---\n");
 
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
