@@ -1,0 +1,59 @@
+Current Bottleneck
+Every extraction node in workflows/ingestion.ts stores the document ID in sourceRefsJson instead of chunk IDs, causing the scoring engine's sourceWeight signal to be permanently zero for all extracted brain objects.
+Why This Is The Bottleneck
+
+In every extraction node (extractPrinciplesNode, extractRulesNode, extractPlaybooksNode, extractAntiPatternsNode), the persisted value is sourceRefsJson: JSON.stringify([state.documentId]) — the document ID, e.g. [17].
+The scoring engine in lib/scoring.ts → buildChunkToDocMap() queries SELECT id, document_id FROM document_chunks WHERE id = ANY($1) — treating those stored integers as chunk IDs, not document IDs.
+Since document ID 17 is almost certainly not a valid chunk ID in most databases, the query returns no rows. distinctDocs = 0 → sourceWeight = log(1+0)/log(1+5) = 0.
+The scoring formula weights sourceWeight at 10%: 0.1 × 0 = 0 for every object, always. That weight is completely dead.
+The LLM correctly extracts sourceChunkIds during extraction — they exist in the ExtractedPrinciple, ExtractedRule etc. interfaces and are passed through — but are then silently discarded at persist time in favour of state.documentId.
+This also means deduplication across re-ingestion of the same document merges by document ID, not chunk ID, so source diversity is undercounted when the same concept appears across multiple chunks.
+
+Primary Layer
+scoring_ranking
+Exact Next Fix
+In all four extraction nodes, replace JSON.stringify([state.documentId]) with JSON.stringify(item.sourceChunkIds). The chunk IDs are already computed correctly by the LLM and validated — they just need to be stored instead of discarded.
+Files / Modules To Change
+One file only: artifacts/api-server/src/workflows/ingestion.ts
+Four identical one-line fixes:
+typescript// extractPrinciplesNode — line ~240 (approx)
+// BEFORE:
+sourceRefsJson: JSON.stringify([state.documentId]),
+// AFTER:
+sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+
+// extractRulesNode — same pattern
+// BEFORE:
+sourceRefsJson: JSON.stringify([state.documentId]),
+// AFTER:
+sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+
+// extractPlaybooksNode — same pattern
+// BEFORE:
+sourceRefsJson: JSON.stringify([state.documentId]),
+// AFTER:
+sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+
+// extractAntiPatternsNode — same pattern
+// BEFORE:
+sourceRefsJson: JSON.stringify([state.documentId]),
+// AFTER:
+sourceRefsJson: JSON.stringify(item.sourceChunkIds),
+Implementation Notes
+The chunk IDs in sourceChunkIds are validated as integers at extraction time (filter(Number.isInteger)) and fall back to [state.chunks[0].id] if the LLM returns nothing. So they are safe to store directly — no additional validation needed.
+After making this change, re-ingest at least one document so existing objects in the DB also get correct chunk refs. Alternatively, write a one-off migration that re-maps the stored document IDs to chunk IDs for objects already in the brain.
+The dedupeAndMergeNode merge logic also references sourceRefsJson when merging duplicates. After this fix, merged objects will accumulate chunk IDs from both the existing and candidate objects, which is correct and improves sourceWeight for objects corroborated by multiple chunks.
+How To Test
+
+Re-ingest a document. Query the principles table directly: SELECT id, source_refs_json FROM principles ORDER BY id DESC LIMIT 5. Values should be arrays of integers matching rows in document_chunks — not single-element arrays matching the document ID.
+Run a Knowledge QA query on a topic covered by the ingested document. Check the scoring_trace_json in query_traces. sourceWeight for retrieved objects should now be > 0. Previously it would be 0 for all extracted objects.
+Ingest the same document twice. The dedup node should merge duplicates and the surviving object's source_refs_json should contain chunk IDs from both ingestion runs (deduped by Set).
+Run SELECT COUNT(*) FROM principles WHERE source_refs_json = '[17]' (replace 17 with your document ID). After re-ingestion this count should drop to zero — no objects should store a bare document ID.
+Compare finalScore for the same objects before and after the fix using the scoring trace. Objects sourced from multiple chunks should now score higher than single-chunk objects.
+
+Expected Improvement
+sourceWeight activates immediately for all newly ingested objects. Objects supported by 3–5 distinct chunks will score ~8–10% higher than single-chunk objects. Retrieval quality improves proportionally — better-evidenced objects will outrank weakly-evidenced ones as intended by the scoring design.
+Do Not Change Yet
+Scoring weights — the 0.6/0.2/0.1/0.05/0.05 split is fine. Don't tune it until sourceWeight is actually contributing real signal, which requires this fix first.
+Chunk size constants — CHUNK_TARGET_TOKENS = 400 and CHUNK_OVERLAP_TOKENS = 50 are reasonable. Don't adjust until you have trace data showing retrieval failures caused by chunking, not scoring.
+applies_when schema fields — valid long-term addition, but not the bottleneck right now.

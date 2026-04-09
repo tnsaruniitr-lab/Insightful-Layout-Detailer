@@ -113,20 +113,10 @@ export function parseEmbedding(raw: string | null | undefined): number[] {
   try { return JSON.parse(raw as string) as number[]; } catch { return []; }
 }
 
-export async function buildChunkToDocMap(candidates: ScoringCandidate[]): Promise<Map<number, number>> {
-  const allChunkIds = new Set<number>();
-  for (const c of candidates) {
-    const ids = safeParseJson<number[]>(c.sourceRefsJson, []);
-    for (const id of ids) { if (typeof id === "number") allChunkIds.add(id); }
-  }
-  if (allChunkIds.size === 0) return new Map();
-  const rows = await pool.query<{ id: number; document_id: number }>(
-    "SELECT id, document_id FROM document_chunks WHERE id = ANY($1)",
-    [Array.from(allChunkIds)]
-  );
-  const map = new Map<number, number>();
-  for (const r of rows.rows) map.set(r.id, r.document_id);
-  return map;
+// sourceRefsJson now stores document IDs directly — no chunk lookup needed.
+// This function is kept for interface compatibility but returns an empty map.
+export async function buildChunkToDocMap(_candidates: ScoringCandidate[]): Promise<Map<number, number>> {
+  return new Map();
 }
 
 export async function buildFrequencyMap(): Promise<{ map: Map<string, number>; totalTraceCount: number }> {
@@ -146,17 +136,15 @@ export async function buildFrequencyMap(): Promise<{ map: Map<string, number>; t
 
 function scoreCandidates(
   candidates: ScoringCandidate[],
-  chunkToDocMap: Map<number, number>,
+  _chunkToDocMap: Map<number, number>,
   frequencyMap: Map<string, number>,
   totalTraceCount: number
 ): ScoredCandidate[] {
   return candidates.map((c) => {
     const similarity = Math.max(0, Math.min(1, 1 - c.cosineDist));
-    const chunkIds = safeParseJson<number[]>(c.sourceRefsJson, []);
-    const distinctDocIds = new Set(
-      chunkIds.map((id) => chunkToDocMap.get(id)).filter((id): id is number => id !== undefined)
-    );
-    const distinctDocs = Math.max(1, distinctDocIds.size);
+    // sourceRefsJson stores document IDs directly — count them without a chunk lookup
+    const docIds = safeParseJson<number[]>(c.sourceRefsJson, []);
+    const distinctDocs = Math.max(1, new Set(docIds).size);
     const sourceWeight = Math.log(1 + distinctDocs) / Math.log(1 + 5);
     const frequencyCount = frequencyMap.get(`${c.type}:${c.id}`) ?? 0;
     const frequencyBonus = totalTraceCount >= 20
