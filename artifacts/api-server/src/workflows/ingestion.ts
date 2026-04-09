@@ -270,7 +270,17 @@ async function classifyChunksNode(state: IngestionStateType): Promise<Partial<In
       new SystemMessage(
         `You classify text chunks for a marketing intelligence system.
 For each chunk, respond with a JSON array of objects: [{index, domain_tag, source_confidence}]
-domain_tag options: seo, geo, aeo, content, entity, general
+
+domain_tag — choose the MOST specific match:
+- aeo: AI Overviews, AI Mode, AI-generated answers, featured snippets, answer boxes, conversational search, LLM citations, voice search, question-answer optimization, "AI search", "generative search", Google SGE
+- seo: search rankings, crawling, indexing, structured data markup, Core Web Vitals, backlinks, robots.txt, sitemaps, canonicals, redirects, traditional organic search signals
+- geo: geographic targeting, local search, international SEO, hreflang, country-specific content, local pack
+- content: content strategy, writing quality, editorial standards, content planning (when NOT about AI answers)
+- entity: entity recognition, knowledge graph, brand entities, structured entity markup
+- general: cross-domain or genuinely unclear
+
+CRITICAL: Content about "AI Overviews", "AI Mode", "featured snippets", or any Google AI answer surface MUST be tagged aeo, not seo — even if the doc also covers crawling or indexing.
+
 source_confidence: 0.0 to 1.0 (how authoritative the content seems)
 Respond ONLY with valid JSON array, no markdown.`
       ),
@@ -498,7 +508,12 @@ async function extractPlaybooksNode(state: IngestionStateType): Promise<Partial<
     new SystemMessage(
       `You extract actionable playbooks from knowledge documents.
 A playbook is a repeatable procedure for achieving a specific outcome — it may be a technical implementation process, a compliance workflow, or a strategic marketing procedure.
-Extract 0-3 playbooks from the content. Extract if a step-by-step process is present, either explicitly listed OR derivable from a set of related sequential rules in the content.
+
+Extract 0-3 playbooks. Extraction rules:
+- Extract if a step-by-step process is present, either explicitly listed OR derivable from a set of related sequential requirements/rules in the content
+- Technical implementation guides, "how to add X", "how to implement Y", structured data documentation, and feed/API integration guides ALWAYS contain at least one playbook — extract the implementation procedure
+- Do not require the steps to be numbered; sequential dependencies between paragraphs qualify
+
 Respond with a JSON array: [{name, summary, use_when, avoid_when, expected_outcomes, domain_tag, confidence_score, source_chunk_ids, steps}]
 - steps: array of {title, description} — the ordered execution steps (2-8 steps)
 - use_when: specific conditions that trigger this playbook (not vague like "when needed")
@@ -590,12 +605,20 @@ async function extractAntiPatternsNode(state: IngestionStateType): Promise<Parti
   const response = await withRetry(() => strongModel.invoke([
     new SystemMessage(
       `You extract anti-patterns from knowledge documents.
-An anti-pattern is a common mistake, violation, or harmful practice that produces negative outcomes.
-This includes technical anti-patterns (wrong redirect types, cloaking), compliance violations (against Google/platform policies), and strategic mistakes.
-Extract 0-4 anti-patterns from the content. Only extract if genuinely present.
+An anti-pattern is a common mistake, violation, or harmful practice that produces negative outcomes — including:
+- Technical mistakes (wrong redirect types, cloaking, incorrect implementation, unsupported file formats)
+- Compliance violations (practices prohibited by Google/platform policies)
+- Strategic mistakes with documented negative outcomes
+- Derivable don'ts: if the content says "avoid X", "do not use Y", "Z will be ignored", "A is not supported", "don't block with B" — extract that as an anti-pattern even if it isn't framed as an explicit mistake list
+
+Extract 0-6 anti-patterns. Expected yield by doc type:
+- Policy/guideline docs that enumerate restrictions: 2-5 anti-patterns
+- Implementation guides that include what NOT to do: 1-3 anti-patterns
+- Conceptual overviews: 0-2 anti-patterns
+
 Respond with a JSON array: [{title, description, signals, domain_tag, risk_level, confidence_score, source_chunk_ids}]
-- signals: array of specific, observable signs that this anti-pattern is occurring (not vague like "poor performance")
-- risk_level: one of: high, medium, low — base on severity of consequence
+- signals: array of specific observable signs this anti-pattern is occurring (e.g. "noindex directive inside robots.txt disallow block" not "poor configuration")
+- risk_level: one of: high, medium, low — based on severity of consequence
 - domain_tag: one of: seo, geo, aeo, content, entity, general
 - confidence_score: 0.0 to 1.0
 Respond ONLY with valid JSON array, no markdown.`
