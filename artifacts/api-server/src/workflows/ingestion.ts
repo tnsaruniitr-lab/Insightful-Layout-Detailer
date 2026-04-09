@@ -498,7 +498,7 @@ async function extractPlaybooksNode(state: IngestionStateType): Promise<Partial<
     new SystemMessage(
       `You extract actionable playbooks from knowledge documents.
 A playbook is a repeatable procedure for achieving a specific outcome — it may be a technical implementation process, a compliance workflow, or a strategic marketing procedure.
-Extract 0-3 playbooks from the content. Only extract if a genuine step-by-step process is present.
+Extract 0-3 playbooks from the content. Extract if a step-by-step process is present, either explicitly listed OR derivable from a set of related sequential rules in the content.
 Respond with a JSON array: [{name, summary, use_when, avoid_when, expected_outcomes, domain_tag, confidence_score, source_chunk_ids, steps}]
 - steps: array of {title, description} — the ordered execution steps (2-8 steps)
 - use_when: specific conditions that trigger this playbook (not vague like "when needed")
