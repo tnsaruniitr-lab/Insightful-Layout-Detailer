@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,18 +6,39 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { UploadDocumentFormDomainTag, UploadDocumentFormTrustLevel } from "@workspace/api-client-react";
-import { Upload, CheckCircle2, AlertCircle, Loader2, X, FileText } from "lucide-react";
+import { Upload, CheckCircle2, AlertCircle, Loader2, X, FileText, Sparkles } from "lucide-react";
 
 const CONCURRENCY = 3;
 const MAX_POLLS = 50;
 const POLL_MS = 3000;
 
+const TIER_LABELS: Record<string, string> = {
+  tier1: "Tier 1",
+  tier2: "Tier 2",
+  tier3: "Tier 3",
+};
+const TIER_COLORS: Record<string, string> = {
+  tier1: "bg-emerald-100 text-emerald-800",
+  tier2: "bg-blue-100 text-blue-800",
+  tier3: "bg-slate-100 text-slate-600",
+};
+const TIER_TO_TRUST: Record<string, UploadDocumentFormTrustLevel> = {
+  tier1: UploadDocumentFormTrustLevel.high,
+  tier2: UploadDocumentFormTrustLevel.medium,
+  tier3: UploadDocumentFormTrustLevel.low,
+};
+
 interface BulkItem {
   id: string;
   file: File;
   title: string;
+  sourceUrl: string;
   domainTag: UploadDocumentFormDomainTag;
   trustLevel: UploadDocumentFormTrustLevel;
+  trustLevelOverridden: boolean;
+  autoTier?: string;
+  autoOrg?: string;
+  classifying: boolean;
   status: "pending" | "uploading" | "processing" | "done" | "error";
   percent: number;
   progressLabel: string;
@@ -32,7 +53,8 @@ function getSourceType(file: File): string {
   return "text";
 }
 
-function statusIcon(status: BulkItem["status"]) {
+function statusIcon(status: BulkItem["status"], classifying: boolean) {
+  if (classifying) return <Loader2 className="h-4 w-4 text-muted-foreground animate-spin shrink-0" />;
   if (status === "done") return <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />;
   if (status === "error") return <AlertCircle className="h-4 w-4 text-destructive shrink-0" />;
   if (status === "uploading" || status === "processing") return <Loader2 className="h-4 w-4 text-blue-500 animate-spin shrink-0" />;
@@ -56,6 +78,31 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
   }, []);
 
+  const classifyItem = useCallback(async (id: string, title: string, sourceUrl?: string) => {
+    const base = (import.meta.env.BASE_URL ?? "").replace(/\/$/, "");
+    updateItem(id, { classifying: true });
+    try {
+      const params = new URLSearchParams({ title });
+      if (sourceUrl) params.set("sourceUrl", sourceUrl);
+      const res = await fetch(`${base}/api/documents/pre-classify?${params.toString()}`);
+      if (!res.ok) throw new Error("classify failed");
+      const data = await res.json() as { sourceOrg: string; tier: string; trustLevel: string };
+      setItems((prev) => prev.map((item) => {
+        if (item.id !== id) return item;
+        const detectedTrust = TIER_TO_TRUST[data.tier] ?? UploadDocumentFormTrustLevel.medium;
+        return {
+          ...item,
+          autoTier: data.tier,
+          autoOrg: data.sourceOrg,
+          classifying: false,
+          trustLevel: item.trustLevelOverridden ? item.trustLevel : detectedTrust,
+        };
+      }));
+    } catch {
+      updateItem(id, { classifying: false });
+    }
+  }, [updateItem]);
+
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
     const all = Array.from(files);
@@ -66,13 +113,31 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
       id: `${Date.now()}-${Math.random()}`,
       file,
       title: file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
+      sourceUrl: "",
       domainTag: UploadDocumentFormDomainTag.general,
       trustLevel: UploadDocumentFormTrustLevel.high,
+      trustLevelOverridden: false,
+      classifying: false,
       status: "pending",
       percent: 0,
       progressLabel: "Queued",
     }));
     setItems((prev) => [...prev, ...newItems]);
+    for (const item of newItems) {
+      classifyItem(item.id, item.title);
+    }
+  };
+
+  const handleTitleBlur = (id: string, title: string) => {
+    const item = items.find((i) => i.id === id);
+    if (!item || !title.trim()) return;
+    classifyItem(id, title.trim(), item.sourceUrl || undefined);
+  };
+
+  const handleSourceUrlBlur = (id: string, sourceUrl: string) => {
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+    classifyItem(id, item.title, sourceUrl || undefined);
   };
 
   const removeItem = (id: string) => {
@@ -92,6 +157,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
       form.append("domainTag", item.domainTag);
       form.append("trustLevel", item.trustLevel);
       form.append("sourceType", getSourceType(item.file));
+      if (item.sourceUrl) form.append("sourceUrl", item.sourceUrl);
       if (activeBrandId) form.append("brandId", String(activeBrandId));
 
       const uploadRes = await fetch(`${base}/api/documents/upload`, { method: "POST", body: form });
@@ -183,7 +249,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
             <Upload className="h-5 w-5" /> Bulk Upload
           </DialogTitle>
           <DialogDescription>
-            Upload up to 15 documents. Processing runs {CONCURRENCY} at a time with parallel extraction per document.
+            Upload up to 15 documents. Authority tier is auto-detected from filename and URL — you can override per row.
           </DialogDescription>
         </DialogHeader>
 
@@ -205,7 +271,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
               {droppedCount > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  {droppedCount} file{droppedCount !== 1 ? "s" : ""} not added — limit is 15. Remove some files to add more.
+                  {droppedCount} file{droppedCount !== 1 ? "s" : ""} not added — limit is 15.
                 </div>
               )}
             </>
@@ -215,26 +281,38 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
             <div className="space-y-2">
               {items.map((item) => (
                 <div key={item.id} className="border rounded-lg p-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    {statusIcon(item.status)}
-                    <div className="flex-1 min-w-0">
+                  <div className="flex items-start gap-2">
+                    <div className="mt-1">{statusIcon(item.status, item.classifying && item.status === "pending")}</div>
+                    <div className="flex-1 min-w-0 space-y-1.5">
                       {started ? (
                         <span className="font-medium text-sm truncate block">{item.title}</span>
                       ) : (
                         <Input
                           value={item.title}
                           onChange={(e) => setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, title: e.target.value } : i))}
+                          onBlur={(e) => handleTitleBlur(item.id, e.target.value)}
                           className="h-7 text-sm"
+                          placeholder="Document title"
+                        />
+                      )}
+                      {!started && (
+                        <Input
+                          value={item.sourceUrl}
+                          onChange={(e) => setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, sourceUrl: e.target.value } : i))}
+                          onBlur={(e) => handleSourceUrlBlur(item.id, e.target.value)}
+                          className="h-6 text-xs text-muted-foreground"
+                          placeholder="Source URL (optional — improves tier detection)"
                         />
                       )}
                     </div>
+
                     {!started && (
                       <div className="flex items-center gap-1 shrink-0">
                         <Select
                           value={item.domainTag}
                           onValueChange={(v) => setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, domainTag: v as UploadDocumentFormDomainTag } : i))}
                         >
-                          <SelectTrigger className="h-7 w-[90px] text-xs"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="h-7 w-[80px] text-xs"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {Object.values(UploadDocumentFormDomainTag).map((t) => (
                               <SelectItem key={t} value={t} className="text-xs">{t.toUpperCase()}</SelectItem>
@@ -243,13 +321,13 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
                         </Select>
                         <Select
                           value={item.trustLevel}
-                          onValueChange={(v) => setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, trustLevel: v as UploadDocumentFormTrustLevel } : i))}
+                          onValueChange={(v) => setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, trustLevel: v as UploadDocumentFormTrustLevel, trustLevelOverridden: true } : i))}
                         >
                           <SelectTrigger className="h-7 w-[80px] text-xs"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {Object.values(UploadDocumentFormTrustLevel).map((t) => (
-                              <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
-                            ))}
+                            <SelectItem value="high" className="text-xs">Tier 1</SelectItem>
+                            <SelectItem value="medium" className="text-xs">Tier 2</SelectItem>
+                            <SelectItem value="low" className="text-xs">Tier 3</SelectItem>
                           </SelectContent>
                         </Select>
                         <button onClick={() => removeItem(item.id)} className="text-muted-foreground hover:text-destructive p-1">
@@ -257,6 +335,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
                         </button>
                       </div>
                     )}
+
                     {started && (
                       <Badge
                         variant={item.status === "done" ? "secondary" : item.status === "error" ? "destructive" : "default"}
@@ -266,6 +345,21 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
                       </Badge>
                     )}
                   </div>
+
+                  {!started && item.autoTier && (
+                    <div className="flex items-center gap-1.5 ml-6">
+                      <Sparkles className="h-3 w-3 text-muted-foreground" />
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${TIER_COLORS[item.autoTier] ?? "bg-slate-100 text-slate-600"}`}>
+                        {TIER_LABELS[item.autoTier] ?? item.autoTier}
+                      </span>
+                      {item.autoOrg && item.autoOrg !== "Unknown" && (
+                        <span className="text-[10px] text-muted-foreground">{item.autoOrg}</span>
+                      )}
+                      {item.trustLevelOverridden && (
+                        <span className="text-[10px] text-amber-600">(overridden)</span>
+                      )}
+                    </div>
+                  )}
 
                   {(item.status === "uploading" || item.status === "processing") && (
                     <div className="space-y-1">
@@ -294,7 +388,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
           {!started && (
             <>
               <Button variant="outline" onClick={() => { onOpenChange(false); reset(); }}>Cancel</Button>
-              <Button onClick={startBulkUpload} disabled={items.length === 0 || items.every((i) => !i.title.trim())}>
+              <Button onClick={startBulkUpload} disabled={items.length === 0 || items.every((i) => !i.title.trim()) || items.some((i) => i.classifying)}>
                 <Upload className="h-4 w-4 mr-2" />
                 Upload {items.length > 0 ? `${items.length} Document${items.length !== 1 ? "s" : ""}` : "Documents"}
               </Button>

@@ -71,6 +71,9 @@ export const documentsTable = pgTable("documents", {
   rawTextStatus: rawTextStatusEnum("raw_text_status").notNull().default("pending"),
   errorMessage: text("error_message"),
   trustLevel: trustLevelEnum("trust_level").notNull().default("medium"),
+  sourceOrg: text("source_org"),
+  authorityTier: text("authority_tier"),
+  classifierConfidence: numeric("classifier_confidence", { precision: 4, scale: 3 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

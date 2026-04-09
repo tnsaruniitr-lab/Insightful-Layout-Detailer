@@ -85,9 +85,14 @@ export default function KnowledgeHub() {
 
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
   const [domainTag, setDomainTag] = useState<UploadDocumentFormDomainTag>(UploadDocumentFormDomainTag.general);
   const [sourceType, setSourceType] = useState<UploadDocumentFormSourceType>(UploadDocumentFormSourceType.text);
   const [trustLevel, setTrustLevel] = useState<UploadDocumentFormTrustLevel>(UploadDocumentFormTrustLevel.high);
+  const [trustLevelOverridden, setTrustLevelOverridden] = useState(false);
+  const [detectedOrg, setDetectedOrg] = useState<string | null>(null);
+  const [detectedTier, setDetectedTier] = useState<string | null>(null);
+  const [isClassifying, setIsClassifying] = useState(false);
 
   const listParams = {
     ...(domainFilter !== "all" ? { domain_tag: domainFilter as DocumentDomainTag } : {}),
@@ -161,6 +166,31 @@ export default function KnowledgeHub() {
     [queryClient, stopPolling, toast]
   );
 
+  const runClassify = useCallback(async (t: string, url?: string) => {
+    if (!t.trim()) return;
+    setIsClassifying(true);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const params = new URLSearchParams({ title: t });
+      if (url) params.set("sourceUrl", url);
+      const res = await fetch(`${base}/api/documents/pre-classify?${params.toString()}`);
+      if (!res.ok) return;
+      const data = await res.json() as { sourceOrg: string; tier: string; trustLevel: string };
+      setDetectedOrg(data.sourceOrg);
+      setDetectedTier(data.tier);
+      if (!trustLevelOverridden) {
+        const map: Record<string, UploadDocumentFormTrustLevel> = {
+          tier1: UploadDocumentFormTrustLevel.high,
+          tier2: UploadDocumentFormTrustLevel.medium,
+          tier3: UploadDocumentFormTrustLevel.low,
+        };
+        if (map[data.tier]) setTrustLevel(map[data.tier]);
+      }
+    } finally {
+      setIsClassifying(false);
+    }
+  }, [trustLevelOverridden]);
+
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !title) return;
@@ -180,6 +210,10 @@ export default function KnowledgeHub() {
       setIsUploadOpen(false);
       setFile(null);
       setTitle("");
+      setSourceUrl("");
+      setDetectedOrg(null);
+      setDetectedTier(null);
+      setTrustLevelOverridden(false);
       setProcessingDocId(uploaded.id);
       queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
 
@@ -345,7 +379,25 @@ export default function KnowledgeHub() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="title">Document Title</Label>
-                  <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. GEO Optimization Playbook 2024" required />
+                  <Input
+                    id="title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    onBlur={(e) => { if (e.target.value.trim()) runClassify(e.target.value.trim(), sourceUrl || undefined); }}
+                    placeholder="e.g. GEO Optimization Playbook 2024"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sourceUrl">Source URL <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input
+                    id="sourceUrl"
+                    value={sourceUrl}
+                    onChange={(e) => setSourceUrl(e.target.value)}
+                    onBlur={(e) => { if (title.trim()) runClassify(title.trim(), e.target.value || undefined); }}
+                    placeholder="https://developers.google.com/..."
+                    type="url"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -373,7 +425,7 @@ export default function KnowledgeHub() {
                 </div>
                 <div className="space-y-2">
                   <Label>Authority Tier</Label>
-                  <Select value={trustLevel} onValueChange={(v) => setTrustLevel(v as UploadDocumentFormTrustLevel)}>
+                  <Select value={trustLevel} onValueChange={(v) => { setTrustLevel(v as UploadDocumentFormTrustLevel); setTrustLevelOverridden(true); }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="high">Tier 1 — High Authority (primary research, official docs)</SelectItem>
@@ -381,6 +433,20 @@ export default function KnowledgeHub() {
                       <SelectItem value="low">Tier 3 — General (blogs, opinion pieces)</SelectItem>
                     </SelectContent>
                   </Select>
+                  {isClassifying && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Detecting source authority...
+                    </p>
+                  )}
+                  {!isClassifying && detectedTier && detectedOrg && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <span className="text-emerald-600">✓ Auto-detected:</span>
+                      <span className="font-medium">{detectedOrg}</span>
+                      <span className="text-muted-foreground">·</span>
+                      <span>{detectedTier === "tier1" ? "Tier 1" : detectedTier === "tier2" ? "Tier 2" : "Tier 3"}</span>
+                      {trustLevelOverridden && <span className="text-amber-600">(manually overridden)</span>}
+                    </p>
+                  )}
                 </div>
                 <DialogFooter>
                   <Button type="submit" disabled={!file || !title || uploadDoc.isPending || processDoc.isPending}>

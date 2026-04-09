@@ -13,6 +13,7 @@ import {
 } from "@workspace/api-zod";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { fireAndForget } from "../lib/jobRunner";
+import { classifySourceAuthority, tierToTrustLevel } from "../lib/sourceClassifier";
 
 type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
 type DocStatus = "pending" | "processing" | "done" | "error";
@@ -59,6 +60,17 @@ router.get("/documents", async (req: Request, res: Response): Promise<void> => {
   res.json(rows);
 });
 
+router.get("/documents/pre-classify", async (req: Request, res: Response): Promise<void> => {
+  const title = typeof req.query.title === "string" ? req.query.title.trim() : "";
+  const sourceUrl = typeof req.query.sourceUrl === "string" ? req.query.sourceUrl.trim() : undefined;
+  if (!title) {
+    res.status(400).json({ error: "title is required" });
+    return;
+  }
+  const result = await classifySourceAuthority(title, sourceUrl);
+  res.json({ ...result, trustLevel: tierToTrustLevel(result.tier) });
+});
+
 router.post(
   "/documents/upload",
   upload.single("file"),
@@ -91,6 +103,9 @@ router.post(
       return;
     }
 
+    const classification = await classifySourceAuthority(title, sourceUrl);
+    const derivedTrustLevel = trustLevel ?? tierToTrustLevel(classification.tier);
+
     const [doc] = await db
       .insert(documentsTable)
       .values({
@@ -101,8 +116,11 @@ router.post(
         sourceUrl: sourceUrl ?? null,
         storagePath: objectPath,
         rawTextStatus: "pending",
-        trustLevel: (trustLevel ?? "medium") as TrustLevel,
+        trustLevel: derivedTrustLevel as TrustLevel,
         brandId: brandId ?? null,
+        sourceOrg: classification.sourceOrg,
+        authorityTier: classification.tier,
+        classifierConfidence: String(classification.confidence),
       })
       .returning();
 
