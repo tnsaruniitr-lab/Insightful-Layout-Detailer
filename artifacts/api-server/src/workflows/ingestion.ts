@@ -17,6 +17,8 @@ import { ObjectStorageService } from "../lib/objectStorage";
 import { logger } from "../lib/logger";
 
 const DEDUPE_SIMILARITY_THRESHOLD = 0.92;
+const ENRICHMENT_MIN_THRESHOLD = 0.88;
+const CONFLICT_DETECTION_THRESHOLD = 0.82;
 const CHUNK_TARGET_TOKENS = 400;
 const CHUNK_OVERLAP_TOKENS = 50;
 const EMBED_BATCH_SIZE = 100;
@@ -696,12 +698,28 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
   await setProgress(state.documentId, "deduplicating");
   const embedModel = createEmbeddings();
 
+  async function promoteToCanonicalIfEligible(table: string, id: number) {
+    await pool.query(
+      `UPDATE ${table} SET status = 'canonical'
+       WHERE id = $1
+         AND status != 'canonical'
+         AND contested = false
+         AND confidence_score::numeric > 0.95
+         AND (
+           source_count >= 3
+           OR json_array_length(source_refs_json::json) >= 3
+         )`,
+      [id]
+    );
+  }
+
   async function dedupeById<T extends { id: number }>(
     table: "principles" | "rules" | "playbooks" | "anti_patterns",
     candidateIds: number[],
     embeddingTextFn: (row: T) => string,
     mergeUpdateFn: (existingId: number, existingRow: { id: number; source_refs_json: string }, candidateRow: T) => Promise<void>,
-    fetchFn: (ids: number[]) => Promise<T[]>
+    fetchFn: (ids: number[]) => Promise<T[]>,
+    bodyTextFn?: (row: T) => string
   ) {
     if (candidateIds.length === 0) return;
     const candidates = await fetchFn(candidateIds);
@@ -725,24 +743,87 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
       );
 
       let merged = false;
+      let enriched = false;
+
       for (const row of existing.rows) {
-        if (row.embedding_str) {
-          const existVec = row.embedding_str.slice(1, -1).split(",").map(Number);
-          if (cosineSimilarity(embedding, existVec) >= DEDUPE_SIMILARITY_THRESHOLD) {
-            await mergeUpdateFn(row.id, row, candidate);
+        if (!row.embedding_str) continue;
+        const existVec = row.embedding_str.slice(1, -1).split(",").map(Number);
+        const sim = cosineSimilarity(embedding, existVec);
+
+        if (sim >= DEDUPE_SIMILARITY_THRESHOLD) {
+          await mergeUpdateFn(row.id, row, candidate);
+          await pool.query(`DELETE FROM ${table} WHERE id = $1`, [candidate.id]);
+          merged = true;
+          await promoteToCanonicalIfEligible(table, row.id);
+          logger.info({ table, existingId: row.id, candidateId: candidate.id, sim }, "Deduplicated — merged into existing");
+          break;
+        }
+
+        if (sim >= ENRICHMENT_MIN_THRESHOLD && bodyTextFn) {
+          const candidateBody = bodyTextFn(candidate);
+          const existBodyRes = await pool.query<{ body: string; conf: string }>(
+            `SELECT COALESCE(statement, description, summary, '') AS body,
+                    COALESCE(confidence_score, '0.7') AS conf
+             FROM ${table} WHERE id = $1`,
+            [row.id]
+          );
+          const existingBody = existBodyRes.rows[0]?.body ?? "";
+          const existingConf = parseFloat(existBodyRes.rows[0]?.conf ?? "0.7");
+          const candConfRes = await pool.query<{ conf: string }>(
+            `SELECT COALESCE(confidence_score, '0.7') AS conf FROM ${table} WHERE id = $1`,
+            [candidate.id]
+          );
+          const candidateConf = parseFloat(candConfRes.rows[0]?.conf ?? "0.7");
+
+          if (candidateBody.length > existingBody.length * 1.3 && candidateConf >= existingConf) {
+            const refs = [...new Set([...JSON.parse(row.source_refs_json || "[]"), ...JSON.parse("[]")])];
+            await pool.query(
+              `UPDATE ${table} SET source_refs_json = $1 WHERE id = $2`,
+              [JSON.stringify(refs), row.id]
+            );
             await pool.query(`DELETE FROM ${table} WHERE id = $1`, [candidate.id]);
-            merged = true;
-            logger.info({ table, existingId: row.id, candidateId: candidate.id }, "Deduplicated — merged into existing");
+            enriched = true;
+            logger.info({ table, existingId: row.id, candidateId: candidate.id, sim }, "Enrichment detected — candidate body longer, merged source refs");
             break;
           }
         }
       }
 
-      if (!merged) {
+      if (!merged && !enriched) {
         await pool.query(
           `UPDATE ${table} SET embedding_vector = $1::vector WHERE id = $2`,
           [vec, candidate.id]
         );
+
+        const negText = `The opposite is true: ${embText}`;
+        const [negEmbedding] = await withRetry(() => embedModel.embedDocuments([negText]), 2, `neg_embed_${table}`);
+        const negVec = `[${negEmbedding.join(",")}]`;
+
+        await pool.query(
+          `UPDATE ${table} SET negation_embedding_vector = $1::vector WHERE id = $2`,
+          [negVec, candidate.id]
+        );
+
+        const conflicts = await pool.query<{ id: number }>(
+          `SELECT id
+           FROM ${table}
+           WHERE embedding_vector IS NOT NULL AND id != $1
+             AND 1 - (embedding_vector <=> $2::vector) > $3
+           ORDER BY embedding_vector <=> $2::vector
+           LIMIT 3`,
+          [candidate.id, negVec, CONFLICT_DETECTION_THRESHOLD]
+        );
+
+        if (conflicts.rows.length > 0) {
+          const conflictIds = conflicts.rows.map((r) => r.id);
+          await pool.query(
+            `UPDATE ${table} SET contested = true WHERE id = ANY($1::int[]) OR id = $2`,
+            [conflictIds, candidate.id]
+          );
+          logger.info({ table, candidateId: candidate.id, conflictIds }, "Conflict detected — objects marked contested");
+        }
+
+        await promoteToCanonicalIfEligible(table, candidate.id);
       }
     }
   }
@@ -767,7 +848,8 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     async (ids) => {
       const rows = await db.select().from(principlesTable).where(inArray(principlesTable.id, ids));
       return rows.map((r) => ({ id: r.id, title: r.title ?? "", statement: r.statement ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]", confidenceScore: r.confidenceScore ?? "0.7" }));
-    }
+    },
+    (r) => r.statement
   );
 
   await dedupeById<{ id: number; name: string; ifCondition: string; thenLogic: string; sourceRefsJson: string }>(
@@ -781,7 +863,8 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     async (ids) => {
       const rows = await db.select().from(rulesTable).where(inArray(rulesTable.id, ids));
       return rows.map((r) => ({ id: r.id, name: r.name ?? "", ifCondition: r.ifCondition ?? "", thenLogic: r.thenLogic ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
-    }
+    },
+    (r) => `${r.ifCondition} ${r.thenLogic}`
   );
 
   await dedupeById<{ id: number; name: string; summary: string; sourceRefsJson: string }>(
@@ -796,7 +879,8 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     async (ids) => {
       const rows = await db.select().from(playbooksTable).where(inArray(playbooksTable.id, ids));
       return rows.map((r) => ({ id: r.id, name: r.name ?? "", summary: r.summary ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
-    }
+    },
+    (r) => r.summary
   );
 
   await dedupeById<{ id: number; title: string; description: string; sourceRefsJson: string }>(
@@ -810,7 +894,8 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     async (ids) => {
       const rows = await db.select().from(antiPatternsTable).where(inArray(antiPatternsTable.id, ids));
       return rows.map((r) => ({ id: r.id, title: r.title ?? "", description: r.description ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
-    }
+    },
+    (r) => r.description
   );
 
   logger.info({ docId: state.documentId }, "Deduplication complete");

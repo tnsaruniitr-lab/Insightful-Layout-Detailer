@@ -321,13 +321,13 @@ export default function KnowledgeHub() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Trust Level</Label>
+                  <Label>Authority Tier</Label>
                   <Select value={trustLevel} onValueChange={(v) => setTrustLevel(v as UploadDocumentFormTrustLevel)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {Object.values(UploadDocumentFormTrustLevel).map((level) => (
-                        <SelectItem key={level} value={level}>{level}</SelectItem>
-                      ))}
+                      <SelectItem value="high">Tier 1 — High Authority (primary research, official docs)</SelectItem>
+                      <SelectItem value="medium">Tier 2 — Medium Authority (industry guides, case studies)</SelectItem>
+                      <SelectItem value="low">Tier 3 — General (blogs, opinion pieces)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -445,7 +445,9 @@ export default function KnowledgeHub() {
                           <h4 className="font-semibold text-base truncate">{doc.title}</h4>
                           <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-muted-foreground">
                             <Badge variant="secondary" className="text-xs font-mono uppercase">{doc.domainTag}</Badge>
-                            <Badge variant="outline" className="text-xs">{doc.trustLevel}</Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {doc.trustLevel === "high" ? "Tier 1" : doc.trustLevel === "medium" ? "Tier 2" : "Tier 3"}
+                            </Badge>
                             <span className="capitalize text-xs">{doc.sourceType.replace("_", " ")}</span>
                             <span className="text-xs">•</span>
                             <span className="text-xs">{new Date(doc.createdAt).toLocaleDateString()}</span>

@@ -147,9 +147,6 @@ function RetrievalTracePanel({ trace }: { trace: MemoScoringTrace }) {
             <Clock className="h-3 w-3" />
             {trace.timings.total_ms}ms
           </span>
-          {trace.frequencyGuardActive && (
-            <span className="text-amber-600">freq-guard active</span>
-          )}
           {trace.dedupFallbackUsed && (
             <span className="text-orange-600">dedup fallback</span>
           )}

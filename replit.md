@@ -70,9 +70,13 @@ The `document_chunks` table has a `embedding_vector_pgv vector(1536)` column man
 | GET | `/playbooks/:id` | Get playbook with steps |
 | GET | `/anti-patterns` | List anti-patterns |
 | GET | `/examples` | List examples |
-| POST | `/brain/ask` | Q&A (AI pipeline - Task 2) |
-| POST | `/brain/map-brand` | Brand mapping (AI pipeline - Task 2) |
-| POST | `/brain/where-to-start` | Strategy start (AI pipeline - Task 2) |
+| POST | `/brain/ask` | Q&A (AI pipeline) |
+| POST | `/brain/map-brand` | Brand mapping (AI pipeline) |
+| POST | `/brain/where-to-start` | Strategy start (AI pipeline) |
+| GET | `/brain/audit` | Full brain health report |
+| GET | `/brain/conflicts` | List contested brain objects |
+| POST | `/brain/conflicts/:id/resolve` | Resolve conflict (keep/discard) |
+| POST | `/brain/backfill-canonical` | Bulk promote canonical objects (requires x-audit-secret header) |
 | GET | `/runs` | List runs |
 | GET | `/runs/:id` | Get run with sources |
 | GET | `/brands/:id/data/assets` | List data assets |
@@ -92,6 +96,7 @@ The `artifacts/sieve` React+Vite frontend is scaffolded at port 21608 (previewPa
 | `/map` | Brand Mapping | Map brain intelligence to brand using `mapBrand` |
 | `/strategy` | Strategy Output | Get strategy recommendations using `getBrandStrategy` |
 | `/runs` | Run History | Full audit log of all intelligence executions |
+| `/conflicts` | Conflict Review | Review and resolve contested brain objects flagged by semantic contradiction detection |
 
 **Key components:**
 - `use-brand-context.tsx` — manages active brand context with localStorage persistence; auto-creates Default Brand on first load (guarded with `useRef` to prevent loops)
@@ -121,5 +126,11 @@ These stubs throw errors until Task 2 (AI Pipelines) implements them.
 - OpenAPI spec: use `type: ["string", "null"]` (not `nullable: true`) for nullable fields
 - Keep `info.title` as `"Api"` in `openapi.yaml` — changing it breaks generated import paths
 - Vector operations use raw SQL / `pool.query()` since `embedding_vector_pgv` is not in Drizzle schema
+- Brain tables (principles, rules, playbooks, anti_patterns) have `contested`, `conflict_pair_id`, and `negation_embedding_vector` columns (vector 1536) added for conflict detection
+- Scoring formula: 0.55×similarity + 0.20×confidence + 0.10×sourceWeight + 0.10×authorityCorroboration + 0.05×canonicalBoost
+- Authority tiers: `trustLevel` high=Tier 1 (3.0), medium=Tier 2 (1.0), low=Tier 3 (0.33)
+- Canonical promotion criteria: source_count >= 3 AND confidence > 0.95 AND contested = false
+- Conflict detection: negation embedding threshold 0.82; enrichment detection range 0.88–0.92
+- `AUDIT_SECRET` header value for admin endpoints: `sieve-audit-2026-xK9mP3`
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.

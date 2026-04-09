@@ -16,6 +16,7 @@ import StrategyOutput from "@/pages/strategy";
 import RunsHistory from "@/pages/runs";
 import RunDetail from "@/pages/run-detail";
 import PlaybooksPage from "@/pages/playbooks";
+import ConflictsPage from "@/pages/conflicts";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -33,6 +34,7 @@ function Router() {
       <Route path="/strategy" component={StrategyOutput} />
       <Route path="/runs/:id" component={RunDetail} />
       <Route path="/runs" component={RunsHistory} />
+      <Route path="/conflicts" component={ConflictsPage} />
       <Route component={NotFound} />
     </Switch>
   );

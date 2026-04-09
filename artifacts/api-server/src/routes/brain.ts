@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { fullSyncToSupabase } from "../lib/supabaseSync";
 import { eq, and, desc, type SQL } from "drizzle-orm";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import {
   principlesTable,
   rulesTable,
@@ -423,7 +423,6 @@ router.get("/brain/audit", async (req: Request, res: Response): Promise<void> =>
       totalTraces: recentTraces.length,
       byRunType: groupCount(recentTraces, (t) => t.runType ?? "unknown"),
       byModel: groupCount(recentTraces, (t) => t.modelUsed ?? "unknown"),
-      frequencyGuardActive: recentTraces.length < 20,
     };
 
     const AEO_REQUIRED_DOMAINS = ["aeo", "geo", "seo", "content", "entity"];
@@ -457,7 +456,6 @@ router.get("/brain/audit", async (req: Request, res: Response): Promise<void> =>
           rulesWithNoSource: ruleMetrics.withEmptySourceRefs,
           playbooksMissingUseWhen: playbookMetrics.withMissingUseWhen,
           failedDocuments: documentMetrics.failedIngestion.length,
-          frequencyGuardActive: traceMetrics.frequencyGuardActive,
         },
       },
       metrics: {
@@ -514,6 +512,88 @@ router.get("/brain/audit", async (req: Request, res: Response): Promise<void> =>
   } catch (err) {
     logger.error({ err }, "Brain audit endpoint failed");
     res.status(500).json({ error: "Audit failed", detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/brain/backfill-canonical", async (req: Request, res: Response): Promise<void> => {
+  const secret = req.headers["x-audit-secret"];
+  if (secret !== "sieve-audit-2026-xK9mP3") {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  try {
+    const tables = ["principles", "rules", "playbooks"];
+    const results: Record<string, number> = {};
+    for (const table of tables) {
+      const r = await pool.query<{ id: number }>(
+        `UPDATE ${table} SET status = 'canonical'
+         WHERE status != 'canonical'
+           AND contested = false
+           AND confidence_score::numeric > 0.95
+           AND (
+             (source_count IS NOT NULL AND source_count >= 3)
+             OR json_array_length(source_refs_json::json) >= 3
+           )
+         RETURNING id`
+      );
+      results[table] = r.rowCount ?? 0;
+    }
+    res.json({ promoted: results });
+  } catch (err) {
+    logger.error({ err }, "Backfill canonical failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/brain/conflicts", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tableConfigs = [
+      { table: "principles", titleCol: "title" },
+      { table: "rules", titleCol: "name" },
+      { table: "playbooks", titleCol: "name" },
+      { table: "anti_patterns", titleCol: "title" },
+    ];
+    const contested: Array<{ table: string; id: number; title: string; domainTag: string | null; status: string | null }> = [];
+
+    for (const { table, titleCol } of tableConfigs) {
+      const rows = await pool.query<{ id: number; title: string; domain_tag: string | null; status: string | null }>(
+        `SELECT id, ${titleCol} AS title, domain_tag, status FROM ${table} WHERE contested = true ORDER BY id`
+      );
+      for (const row of rows.rows) {
+        contested.push({ table, id: row.id, title: row.title, domainTag: row.domain_tag, status: row.status });
+      }
+    }
+
+    res.json({ total: contested.length, contested });
+  } catch (err) {
+    logger.error({ err }, "Get conflicts failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/brain/conflicts/:id/resolve", async (req: Request, res: Response): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  const { table, action } = req.body as { table: string; action: "keep" | "discard" };
+  const ALLOWED_TABLES = ["principles", "rules", "playbooks", "anti_patterns"];
+  if (!ALLOWED_TABLES.includes(table)) {
+    res.status(400).json({ error: "Invalid table" });
+    return;
+  }
+  if (!["keep", "discard"].includes(action)) {
+    res.status(400).json({ error: "action must be keep or discard" });
+    return;
+  }
+  try {
+    if (action === "discard") {
+      await pool.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+      res.json({ deleted: id });
+    } else {
+      await pool.query(`UPDATE ${table} SET contested = false WHERE id = $1`, [id]);
+      res.json({ cleared: id });
+    }
+  } catch (err) {
+    logger.error({ err, id, table, action }, "Resolve conflict failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 

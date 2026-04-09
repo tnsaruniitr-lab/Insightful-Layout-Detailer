@@ -10,7 +10,8 @@ import {
   History,
   Settings,
   Wifi,
-  WifiOff
+  WifiOff,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHealthCheck } from "@workspace/api-client-react";
@@ -32,6 +33,7 @@ export function Layout({ children }: LayoutProps) {
     { name: "Brand Mapping", href: "/map", icon: MapIcon },
     { name: "Strategy Output", href: "/strategy", icon: Settings },
     { name: "Run History", href: "/runs", icon: History },
+    { name: "Conflicts", href: "/conflicts", icon: AlertTriangle },
   ];
 
   return (

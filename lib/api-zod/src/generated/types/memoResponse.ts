@@ -16,11 +16,10 @@ export interface ScoringTraceCandidateSummary {
   similarity: number;
   confidence: number;
   sourceWeight: number;
-  frequencyBonus: number;
+  authorityCorroboration: number;
   canonicalBoost: number;
   finalScore: number;
   distinctDocs: number;
-  frequencyCount: number;
   isCanonical: boolean;
 }
 
@@ -40,7 +39,6 @@ export interface ScoringTraceDiversityRemoval {
 export interface MemoScoringTrace {
   queryLabel: string;
   totalCandidatesReceived: number;
-  frequencyGuardActive: boolean;
   totalTraceCount: number;
   timings: {
     scoring_ms: number;

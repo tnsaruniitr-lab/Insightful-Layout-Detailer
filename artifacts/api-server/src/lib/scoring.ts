@@ -18,11 +18,10 @@ export interface ScoringCandidate {
 export interface ScoredCandidate extends ScoringCandidate {
   similarity: number;
   sourceWeight: number;
-  frequencyBonus: number;
+  authorityCorroboration: number;
   canonicalBoost: number;
   finalScore: number;
   distinctDocs: number;
-  frequencyCount: number;
 }
 
 export interface ScoredCandidateSummary {
@@ -32,11 +31,10 @@ export interface ScoredCandidateSummary {
   similarity: number;
   confidence: number;
   sourceWeight: number;
-  frequencyBonus: number;
+  authorityCorroboration: number;
   canonicalBoost: number;
   finalScore: number;
   distinctDocs: number;
-  frequencyCount: number;
   isCanonical: boolean;
 }
 
@@ -56,7 +54,6 @@ export interface DiversityRemoval {
 export interface ScoringTrace {
   queryLabel: string;
   totalCandidatesReceived: number;
-  frequencyGuardActive: boolean;
   totalTraceCount: number;
   timings: {
     scoring_ms: number;
@@ -77,6 +74,13 @@ export interface ScoringResult {
   selected: ScoredCandidate[];
   trace: ScoringTrace;
 }
+
+const TIER_WEIGHTS: Record<string, number> = {
+  high: 3.0,
+  medium: 1.0,
+  low: 0.33,
+};
+const AUTH_NORM = Math.log(1 + 10);
 
 function cosineDistance(a: number[], b: number[]): number {
   let dot = 0, magA = 0, magB = 0;
@@ -99,11 +103,10 @@ function toSummary(c: ScoredCandidate): ScoredCandidateSummary {
     similarity: +c.similarity.toFixed(4),
     confidence: +c.confidence.toFixed(4),
     sourceWeight: +c.sourceWeight.toFixed(4),
-    frequencyBonus: +c.frequencyBonus.toFixed(4),
+    authorityCorroboration: +c.authorityCorroboration.toFixed(4),
     canonicalBoost: +c.canonicalBoost.toFixed(4),
     finalScore: +c.finalScore.toFixed(4),
     distinctDocs: c.distinctDocs,
-    frequencyCount: c.frequencyCount,
     isCanonical: c.isCanonical,
   };
 }
@@ -113,48 +116,49 @@ export function parseEmbedding(raw: string | null | undefined): number[] {
   try { return JSON.parse(raw as string) as number[]; } catch { return []; }
 }
 
-// sourceRefsJson now stores document IDs directly — no chunk lookup needed.
-// This function is kept for interface compatibility but returns an empty map.
 export async function buildChunkToDocMap(_candidates: ScoringCandidate[]): Promise<Map<number, number>> {
   return new Map();
 }
 
-export async function buildFrequencyMap(): Promise<{ map: Map<string, number>; totalTraceCount: number }> {
-  const countRow = await pool.query<{ count: string }>("SELECT COUNT(*) AS count FROM query_traces");
-  const totalTraceCount = parseInt(countRow.rows[0]?.count ?? "0", 10);
-  if (totalTraceCount < 20) return { map: new Map(), totalTraceCount };
-  const freqRows = await pool.query<{ object_id: number; object_type: string; freq: string }>(
-    `SELECT (elem->>'id')::integer AS object_id, elem->>'type' AS object_type, COUNT(*) AS freq
-     FROM query_traces, jsonb_array_elements(retrieved_objects_json::jsonb) elem
-     WHERE created_at > NOW() - INTERVAL '30 days'
-     GROUP BY 1, 2`
+export async function buildAuthorityMap(docIds: number[]): Promise<Map<number, string>> {
+  if (docIds.length === 0) return new Map();
+  const unique = [...new Set(docIds)];
+  const rows = await pool.query<{ id: number; trust_level: string }>(
+    `SELECT id, trust_level FROM documents WHERE id = ANY($1)`,
+    [unique]
   );
-  const map = new Map<string, number>();
-  for (const r of freqRows.rows) map.set(`${r.object_type}:${r.object_id}`, parseInt(r.freq, 10));
-  return { map, totalTraceCount };
+  const map = new Map<number, string>();
+  for (const r of rows.rows) map.set(r.id, r.trust_level ?? "medium");
+  return map;
+}
+
+function computeAuthorityCorroboration(docIds: number[], authorityMap: Map<number, string>): number {
+  const uniqueIds = [...new Set(docIds)];
+  const totalWeight = uniqueIds.reduce((sum, id) => {
+    const trust = authorityMap.get(id) ?? "medium";
+    return sum + (TIER_WEIGHTS[trust] ?? 1.0);
+  }, 0);
+  return Math.log(1 + totalWeight) / AUTH_NORM;
 }
 
 function scoreCandidates(
   candidates: ScoringCandidate[],
-  _chunkToDocMap: Map<number, number>,
-  frequencyMap: Map<string, number>,
-  totalTraceCount: number
+  authorityMap: Map<number, string>
 ): ScoredCandidate[] {
   return candidates.map((c) => {
     const similarity = Math.max(0, Math.min(1, 1 - c.cosineDist));
-    // sourceRefsJson stores document IDs directly — count them without a chunk lookup
     const docIds = safeParseJson<number[]>(c.sourceRefsJson, []);
     const distinctDocs = Math.max(1, new Set(docIds).size);
     const sourceWeight = Math.log(1 + distinctDocs) / Math.log(1 + 5);
-    const frequencyCount = frequencyMap.get(`${c.type}:${c.id}`) ?? 0;
-    const frequencyBonus = totalTraceCount >= 20
-      ? Math.min(0.1, Math.log(1 + frequencyCount) * 0.03)
-      : 0;
+    const authorityCorroboration = computeAuthorityCorroboration(docIds, authorityMap);
     const canonicalBoost = c.isCanonical ? 0.05 : 0;
     const finalScore =
-      0.6 * similarity + 0.2 * c.confidence + 0.1 * sourceWeight +
-      0.05 * frequencyBonus + 0.05 * canonicalBoost;
-    return { ...c, similarity, sourceWeight, frequencyBonus, canonicalBoost, finalScore, distinctDocs, frequencyCount };
+      0.55 * similarity +
+      0.20 * c.confidence +
+      0.10 * sourceWeight +
+      0.10 * authorityCorroboration +
+      0.05 * canonicalBoost;
+    return { ...c, similarity, sourceWeight, authorityCorroboration, canonicalBoost, finalScore, distinctDocs };
   });
 }
 
@@ -187,7 +191,6 @@ function deduplicateByEmbedding(
     }
   }
 
-  // Fallback: relax threshold if >50% removed
   if (!isRetry && kept.length < Math.ceil(Math.min(candidates.length, 12) * 0.5)) {
     const fallback = deduplicateByEmbedding(candidates, 0.85, true);
     return { ...fallback, fallbackUsed: true };
@@ -239,33 +242,35 @@ function applyDiversity(
   return { selected, removed, capApplied: true };
 }
 
-export function scoreAndSelect(params: {
+export async function scoreAndSelect(params: {
   candidates: ScoringCandidate[];
   chunkToDocMap: Map<number, number>;
-  frequencyMap: Map<string, number>;
-  totalTraceCount: number;
+  frequencyMap?: Map<string, number>;
+  totalTraceCount?: number;
   targetCount?: number;
   queryLabel?: string;
-}): ScoringResult {
-  const { candidates, chunkToDocMap, frequencyMap, totalTraceCount, targetCount = 12, queryLabel = "query" } = params;
+}): Promise<ScoringResult> {
+  const { candidates, targetCount = 12, queryLabel = "query" } = params;
   const totalStart = Date.now();
 
-  // Step 1 — Score
+  const allDocIds = candidates.flatMap((c) => {
+    try { return JSON.parse(c.sourceRefsJson) as number[]; } catch { return []; }
+  });
+  const authorityMap = await buildAuthorityMap(allDocIds);
+
   const scoreStart = Date.now();
-  const scored = scoreCandidates(candidates, chunkToDocMap, frequencyMap, totalTraceCount);
+  const scored = scoreCandidates(candidates, authorityMap);
   scored.sort((a, b) => b.finalScore - a.finalScore);
   const scoring_ms = Date.now() - scoreStart;
 
   const top20BeforeDedup = scored.slice(0, 20).map(toSummary);
 
-  // Step 2 — Dedup
   const dedupStart = Date.now();
   const { kept: deduped, removed: removedByDedup, fallbackUsed: dedupFallbackUsed } =
     deduplicateByEmbedding(scored, 0.88, false);
   const dedup_ms = Date.now() - dedupStart;
   const dedupThreshold = dedupFallbackUsed ? 0.85 : 0.88;
 
-  // Step 3 — Diversity
   const diversityStart = Date.now();
   const { selected, removed: removedByDiversity, capApplied: diversityCapApplied } =
     applyDiversity(deduped, targetCount);
@@ -276,8 +281,7 @@ export function scoreAndSelect(params: {
   const trace: ScoringTrace = {
     queryLabel,
     totalCandidatesReceived: candidates.length,
-    frequencyGuardActive: totalTraceCount < 20,
-    totalTraceCount,
+    totalTraceCount: params.totalTraceCount ?? 0,
     timings: { scoring_ms, dedup_ms, diversity_ms, total_ms },
     top20BeforeDedup,
     removedByDedup,
@@ -296,7 +300,7 @@ export function scoreAndSelect(params: {
       top20: top20BeforeDedup.map((c) => ({
         id: c.id, type: c.type, title: c.title.slice(0, 50),
         similarity: c.similarity, confidence: c.confidence,
-        sourceWeight: c.sourceWeight, frequencyBonus: c.frequencyBonus,
+        sourceWeight: c.sourceWeight, authorityCorroboration: c.authorityCorroboration,
         canonicalBoost: c.canonicalBoost, finalScore: c.finalScore,
       })),
       dedup: {

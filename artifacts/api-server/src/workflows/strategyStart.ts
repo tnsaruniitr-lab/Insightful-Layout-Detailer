@@ -15,7 +15,6 @@ import {
   type ScoringTrace,
   parseEmbedding,
   buildChunkToDocMap,
-  buildFrequencyMap,
   scoreAndSelect,
 } from "../lib/scoring";
 
@@ -191,16 +190,11 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
     })),
   ];
 
-  const [chunkToDocMap, { map: frequencyMap, totalTraceCount }] = await Promise.all([
-    buildChunkToDocMap(candidates),
-    buildFrequencyMap(),
-  ]);
+  const chunkToDocMap = await buildChunkToDocMap(candidates);
 
-  const { selected: scoredObjects, trace: scoringTrace } = scoreAndSelect({
+  const { selected: scoredObjects, trace: scoringTrace } = await scoreAndSelect({
     candidates,
     chunkToDocMap,
-    frequencyMap,
-    totalTraceCount,
     targetCount: 12,
     queryLabel: `strategy:${state.input.brandId}`,
   });
