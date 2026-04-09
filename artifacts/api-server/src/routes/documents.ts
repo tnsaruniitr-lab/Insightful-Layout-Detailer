@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, type SQL } from "drizzle-orm";
+import { eq, and, inArray, type SQL } from "drizzle-orm";
 import multer from "multer";
 import { z } from "zod";
 import { db } from "@workspace/db";
@@ -227,6 +227,56 @@ router.get("/documents/:id/impact", async (req: Request, res: Response): Promise
     willDelete: { principles: pi.willDelete, rules: ri.willDelete, playbooks: pli.willDelete, antiPatterns: ai.willDelete, total: pi.willDelete + ri.willDelete + pli.willDelete + ai.willDelete },
     willUpdate: { principles: pi.willUpdate, rules: ri.willUpdate, playbooks: pli.willUpdate, antiPatterns: ai.willUpdate, total: pi.willUpdate + ri.willUpdate + pli.willUpdate + ai.willUpdate },
   });
+});
+
+router.post("/documents/bulk-delete", async (req: Request, res: Response): Promise<void> => {
+  const { ids } = req.body as { ids?: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: "ids must be a non-empty array" });
+    return;
+  }
+  const docIds = ids.map(Number).filter((n) => !isNaN(n) && n > 0);
+  if (docIds.length === 0) {
+    res.status(400).json({ error: "No valid document ids provided" });
+    return;
+  }
+
+  const [principles, rules, playbooks, antiPatterns] = await Promise.all([
+    db.select({ id: principlesTable.id, sourceRefsJson: principlesTable.sourceRefsJson }).from(principlesTable),
+    db.select({ id: rulesTable.id, sourceRefsJson: rulesTable.sourceRefsJson }).from(rulesTable),
+    db.select({ id: playbooksTable.id, sourceRefsJson: playbooksTable.sourceRefsJson }).from(playbooksTable),
+    db.select({ id: antiPatternsTable.id, sourceRefsJson: antiPatternsTable.sourceRefsJson }).from(antiPatternsTable),
+  ]);
+
+  const docIdSet = new Set(docIds);
+
+  const processBrainTable = async (
+    rows: { id: number; sourceRefsJson: string }[],
+    table: typeof principlesTable | typeof rulesTable | typeof playbooksTable | typeof antiPatternsTable
+  ) => {
+    for (const row of rows) {
+      const refs = parseSourceRefs(row.sourceRefsJson);
+      const remaining = refs.filter((id) => !docIdSet.has(id));
+      if (remaining.length === refs.length) continue;
+      if (remaining.length === 0) {
+        await db.delete(table).where(eq(table.id, row.id));
+      } else {
+        await db.update(table).set({ sourceRefsJson: JSON.stringify(remaining) }).where(eq(table.id, row.id));
+      }
+    }
+  };
+
+  await Promise.all([
+    processBrainTable(principles, principlesTable),
+    processBrainTable(rules, rulesTable),
+    processBrainTable(playbooks, playbooksTable),
+    processBrainTable(antiPatterns, antiPatternsTable),
+  ]);
+
+  await db.delete(documentChunksTable).where(inArray(documentChunksTable.documentId, docIds));
+  await db.delete(documentsTable).where(inArray(documentsTable.id, docIds));
+
+  res.json({ deleted: docIds.length });
 });
 
 router.delete("/documents/:id", async (req: Request, res: Response): Promise<void> => {

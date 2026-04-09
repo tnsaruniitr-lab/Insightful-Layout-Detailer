@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FileText, Upload, RefreshCw, AlertCircle, CheckCircle2, Clock, Database, Loader2, Trash2, Files } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -75,6 +76,10 @@ export default function KnowledgeHub() {
   const [deleteMode, setDeleteMode] = useState<"cascade" | "shallow">("cascade");
   const [impactData, setImpactData] = useState<{ willDelete: { total: number; principles: number; rules: number; playbooks: number; antiPatterns: number }; willUpdate: { total: number } } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -226,6 +231,52 @@ export default function KnowledgeHub() {
       toast({ title: "Delete failed", variant: "destructive" });
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const allIds = documents?.map((d) => d.id) ?? [];
+  const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+  const someSelected = selectedIds.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    setIsBulkDeleting(true);
+    try {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const res = await fetch(`${base}/api/documents/bulk-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      if (!res.ok) throw new Error("Bulk delete failed");
+      const { deleted } = await res.json() as { deleted: number };
+      setSelectedIds(new Set());
+      setIsBulkDeleteOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/principles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rules"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/playbooks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/anti-patterns"] });
+      toast({ title: `${deleted} document${deleted !== 1 ? "s" : ""} and all linked brain objects deleted` });
+    } catch {
+      toast({ title: "Bulk delete failed", variant: "destructive" });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -387,6 +438,17 @@ export default function KnowledgeHub() {
         )}
 
         <div className="flex gap-4 items-center bg-muted/30 p-2 rounded-lg border">
+          <div className="flex items-center gap-2 pl-1">
+            <Checkbox
+              checked={allSelected}
+              onCheckedChange={toggleSelectAll}
+              aria-label="Select all"
+              disabled={allIds.length === 0}
+            />
+            {someSelected && (
+              <span className="text-xs font-medium text-muted-foreground">{selectedIds.size} selected</span>
+            )}
+          </div>
           <div className="flex-1 flex gap-2">
             <Select value={domainFilter} onValueChange={setDomainFilter}>
               <SelectTrigger className="w-[180px]">
@@ -411,9 +473,21 @@ export default function KnowledgeHub() {
               </SelectContent>
             </Select>
           </div>
-          <span className="text-xs text-muted-foreground font-mono pr-2">
-            {documents?.length ?? 0} document{(documents?.length ?? 0) !== 1 ? "s" : ""}
-          </span>
+          <div className="flex items-center gap-2 pr-2">
+            {someSelected && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setIsBulkDeleteOpen(true)}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Deep Delete ({selectedIds.size})
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground font-mono">
+              {documents?.length ?? 0} document{(documents?.length ?? 0) !== 1 ? "s" : ""}
+            </span>
+          </div>
         </div>
 
         <Card>
@@ -436,10 +510,17 @@ export default function KnowledgeHub() {
                   const progress = isPolling ? getProgressInfo(doc) : null;
 
                   return (
-                    <div key={doc.id} className="p-4 flex items-start justify-between hover:bg-muted/20 transition-colors">
+                    <div key={doc.id} className={`p-4 flex items-start justify-between hover:bg-muted/20 transition-colors ${selectedIds.has(doc.id) ? "bg-muted/30" : ""}`}>
                       <div className="flex items-start gap-4 flex-1 min-w-0">
-                        <div className="mt-1 h-10 w-10 bg-primary/10 rounded flex items-center justify-center text-primary shrink-0">
-                          <FileText className="h-5 w-5" />
+                        <div className="flex items-center gap-3 shrink-0 mt-1">
+                          <Checkbox
+                            checked={selectedIds.has(doc.id)}
+                            onCheckedChange={() => toggleSelect(doc.id)}
+                            aria-label={`Select ${doc.title}`}
+                          />
+                          <div className="h-10 w-10 bg-primary/10 rounded flex items-center justify-center text-primary shrink-0">
+                            <FileText className="h-5 w-5" />
+                          </div>
                         </div>
                         <div className="flex-1 min-w-0">
                           <h4 className="font-semibold text-base truncate">{doc.title}</h4>
@@ -574,6 +655,35 @@ export default function KnowledgeHub() {
             </Button>
             <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isDeleting}>
               {isDeleting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Deleting...</> : "Confirm Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBulkDeleteOpen} onOpenChange={(open) => { if (!open && !isBulkDeleting) setIsBulkDeleteOpen(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" /> Deep Delete {selectedIds.size} Document{selectedIds.size !== 1 ? "s" : ""}
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete the selected document{selectedIds.size !== 1 ? "s" : ""} and all brain objects
+              (principles, rules, playbooks, anti-patterns) that were extracted exclusively from them.
+              Objects shared with other documents will have their references updated.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-sm text-destructive font-medium">
+            This action cannot be undone. {selectedIds.size} document{selectedIds.size !== 1 ? "s" : ""} will be permanently removed.
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setIsBulkDeleteOpen(false)} disabled={isBulkDeleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isBulkDeleting}>
+              {isBulkDeleting
+                ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Deleting...</>
+                : `Delete ${selectedIds.size} Document${selectedIds.size !== 1 ? "s" : ""}`
+              }
             </Button>
           </DialogFooter>
         </DialogContent>
