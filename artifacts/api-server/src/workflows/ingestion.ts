@@ -789,26 +789,31 @@ async function persistOutputsNode(state: IngestionStateType): Promise<Partial<In
   return { status: "done" };
 }
 
+async function parallelExtractAllNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
+  await setProgress(state.documentId, "extracting_intelligence");
+  const [principles, rules, playbooks, antiPatterns] = await Promise.all([
+    extractPrinciplesNode(state),
+    extractRulesNode(state),
+    extractPlaybooksNode(state),
+    extractAntiPatternsNode(state),
+  ]);
+  return { ...principles, ...rules, ...playbooks, ...antiPatterns };
+}
+
 const workflow = new StateGraph(IngestionState)
   .addNode("extract_text", extractTextNode)
   .addNode("chunk_document", chunkDocumentNode)
   .addNode("embed_chunks", embedChunksNode)
   .addNode("classify_chunks", classifyChunksNode)
-  .addNode("extract_principles", extractPrinciplesNode)
-  .addNode("extract_rules", extractRulesNode)
-  .addNode("extract_playbooks", extractPlaybooksNode)
-  .addNode("extract_anti_patterns", extractAntiPatternsNode)
+  .addNode("extract_all_parallel", parallelExtractAllNode)
   .addNode("dedupe_merge", dedupeAndMergeNode)
   .addNode("persist_outputs", persistOutputsNode)
   .addEdge(START, "extract_text")
   .addEdge("extract_text", "chunk_document")
   .addEdge("chunk_document", "embed_chunks")
   .addEdge("embed_chunks", "classify_chunks")
-  .addEdge("classify_chunks", "extract_principles")
-  .addEdge("extract_principles", "extract_rules")
-  .addEdge("extract_rules", "extract_playbooks")
-  .addEdge("extract_playbooks", "extract_anti_patterns")
-  .addEdge("extract_anti_patterns", "dedupe_merge")
+  .addEdge("classify_chunks", "extract_all_parallel")
+  .addEdge("extract_all_parallel", "dedupe_merge")
   .addEdge("dedupe_merge", "persist_outputs")
   .addEdge("persist_outputs", END);
 

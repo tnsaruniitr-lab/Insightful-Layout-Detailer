@@ -22,9 +22,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { FileText, Upload, RefreshCw, AlertCircle, CheckCircle2, Clock, Database, Loader2, Trash2 } from "lucide-react";
+import { FileText, Upload, RefreshCw, AlertCircle, CheckCircle2, Clock, Database, Loader2, Trash2, Files } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
+import { BulkUploadDialog } from "@/components/bulk-upload-dialog";
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 30;
@@ -34,10 +35,7 @@ const INGESTION_STEPS = [
   "chunking_document",
   "embedding_chunks",
   "classifying_chunks",
-  "extracting_principles",
-  "extracting_rules",
-  "extracting_playbooks",
-  "extracting_anti_patterns",
+  "extracting_intelligence",
   "deduplicating",
 ];
 
@@ -69,6 +67,7 @@ export default function KnowledgeHub() {
   const [domainFilter, setDomainFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [pollingState, setPollingState] = useState<PollingState | null>(null);
   const [processingDocId, setProcessingDocId] = useState<number | null>(null);
 
@@ -253,7 +252,12 @@ export default function KnowledgeHub() {
             <h1 className="text-3xl font-bold tracking-tight">Knowledge Hub</h1>
             <p className="text-muted-foreground">Manage and ingest source documents for the intelligence engine.</p>
           </div>
-          <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setIsBulkOpen(true)}>
+              <Files className="h-4 w-4 mr-2" />
+              Bulk Upload
+            </Button>
+            <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Upload className="h-4 w-4 mr-2" />
@@ -339,7 +343,14 @@ export default function KnowledgeHub() {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
+
+        <BulkUploadDialog
+          open={isBulkOpen}
+          onOpenChange={setIsBulkOpen}
+          onComplete={() => queryClient.invalidateQueries({ queryKey: ["/api/documents"] })}
+        />
 
         {pollingState && (
           <Card className={`border-blue-200 bg-blue-50/50 ${pollingState.timedOut ? "border-amber-200 bg-amber-50/50" : ""}`}>
