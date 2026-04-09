@@ -351,9 +351,15 @@ async function extractPrinciplesNode(state: IngestionStateType): Promise<Partial
     const response = await withRetry(() => strongModel.invoke([
       new SystemMessage(
         `You extract intelligence principles from knowledge documents.
-A principle is a universal truth about ${domain} that should guide strategy — not a definition, not a description.
+A principle is a universal truth about ${domain} that should guide strategy — not a definition, not a description, not a conditional rule.
 Extract 1-8 principles from the provided content.
 For compliance/policy content (platform guidelines, technical specs), extract the core requirements as principles.
+
+Disambiguation — principles vs rules:
+- If a concept has a clear IF/THEN structure (a specific trigger and a resulting action), it is a RULE not a principle — do not extract it here
+- Do not extract "X pages are not eligible for Y feature" as a principle — that is a rule with if_condition "if page is classified as X" and then_logic "then not eligible for Y"
+- A principle describes a universal truth; a rule describes a conditional action
+
 Respond with a JSON array: [{title, statement, explanation, confidence_score, source_chunk_ids}]
 - title: short name (< 10 words)
 - statement: the core principle in 1-2 sentences — must be actionable, not definitional
@@ -513,6 +519,9 @@ Extract 0-3 playbooks. Extraction rules:
 - Extract if a step-by-step process is present, either explicitly listed OR derivable from a set of related sequential requirements/rules in the content
 - Technical implementation guides, "how to add X", "how to implement Y", structured data documentation, and feed/API integration guides ALWAYS contain at least one playbook — extract the implementation procedure
 - Do not require the steps to be numbered; sequential dependencies between paragraphs qualify
+- Prose procedure: a sentence where a single actor is given 3+ sequential actions using infinitive verbs (e.g. "site owners should review…ensure…add…apply") is a playbook even without numbered formatting — extract each action as an ordered step
+- Advisory checklists ("owners should: [comma-separated actions]") count as playbooks
+- Pattern to detect: actor + "should" or "must" + 3 or more verbs = playbook candidate
 
 Respond with a JSON array: [{name, summary, use_when, avoid_when, expected_outcomes, domain_tag, confidence_score, source_chunk_ids, steps}]
 - steps: array of {title, description} — the ordered execution steps (2-8 steps)
@@ -610,6 +619,10 @@ An anti-pattern is a common mistake, violation, or harmful practice that produce
 - Compliance violations (practices prohibited by Google/platform policies)
 - Strategic mistakes with documented negative outcomes
 - Derivable don'ts: if the content says "avoid X", "do not use Y", "Z will be ignored", "A is not supported", "don't block with B" — extract that as an anti-pattern even if it isn't framed as an explicit mistake list
+- Contrastive framing: "rewards X rather than Y" or "designed for X, not Y" → Y is the anti-pattern
+- Negated evaluation: "does not evaluate/support/apply to X" → assuming it does = anti-pattern
+- Outcome framing: "content that fails to X is likely to perform poorly" → failing X = anti-pattern
+- Implicit contrast: any sentence where a negative outcome is implied by the absence of a positive quality
 
 Extract 0-6 anti-patterns. Expected yield by doc type:
 - Policy/guideline docs that enumerate restrictions: 2-5 anti-patterns

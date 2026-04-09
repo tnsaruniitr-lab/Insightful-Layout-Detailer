@@ -50,6 +50,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
   const [items, setItems] = useState<BulkItem[]>([]);
   const [running, setRunning] = useState(false);
   const [started, setStarted] = useState(false);
+  const [droppedCount, setDroppedCount] = useState(0);
 
   const updateItem = useCallback((id: string, updates: Partial<BulkItem>) => {
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
@@ -57,18 +58,20 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
 
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
-    const newItems: BulkItem[] = Array.from(files)
-      .slice(0, 15)
-      .map((file) => ({
-        id: `${Date.now()}-${Math.random()}`,
-        file,
-        title: file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
-        domainTag: UploadDocumentFormDomainTag.general,
-        trustLevel: UploadDocumentFormTrustLevel.high,
-        status: "pending",
-        percent: 0,
-        progressLabel: "Queued",
-      }));
+    const all = Array.from(files);
+    const capped = all.slice(0, 15);
+    const dropped = all.length - capped.length;
+    setDroppedCount(dropped > 0 ? dropped : 0);
+    const newItems: BulkItem[] = capped.map((file) => ({
+      id: `${Date.now()}-${Math.random()}`,
+      file,
+      title: file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
+      domainTag: UploadDocumentFormDomainTag.general,
+      trustLevel: UploadDocumentFormTrustLevel.high,
+      status: "pending",
+      percent: 0,
+      progressLabel: "Queued",
+    }));
     setItems((prev) => [...prev, ...newItems]);
   };
 
@@ -165,6 +168,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
     if (running) return;
     setItems([]);
     setStarted(false);
+    setDroppedCount(0);
   };
 
   const doneCount = items.filter((i) => i.status === "done").length;
@@ -185,18 +189,26 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
 
         <div className="flex-1 overflow-y-auto space-y-3 py-2 min-h-0">
           {!started && (
-            <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-colors">
-              <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-              <span className="text-sm font-medium">Click to select files</span>
-              <span className="text-xs text-muted-foreground mt-1">PDF, TXT, MD, DOC — up to 15 files</span>
-              <input
-                type="file"
-                className="hidden"
-                multiple
-                accept=".pdf,.txt,.md,.doc,.docx"
-                onChange={(e) => handleFiles(e.target.files)}
-              />
-            </label>
+            <>
+              <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-colors">
+                <Upload className="h-8 w-8 text-muted-foreground mb-2" />
+                <span className="text-sm font-medium">Click to select files</span>
+                <span className="text-xs text-muted-foreground mt-1">PDF, TXT, MD, DOC — up to 15 files</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept=".pdf,.txt,.md,.doc,.docx"
+                  onChange={(e) => handleFiles(e.target.files)}
+                />
+              </label>
+              {droppedCount > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  {droppedCount} file{droppedCount !== 1 ? "s" : ""} not added — limit is 15. Remove some files to add more.
+                </div>
+              )}
+            </>
           )}
 
           {items.length > 0 && (

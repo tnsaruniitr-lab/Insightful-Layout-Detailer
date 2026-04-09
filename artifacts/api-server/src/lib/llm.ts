@@ -1,4 +1,5 @@
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ChatAnthropic } from "@langchain/anthropic";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { logger } from "./logger";
@@ -48,13 +49,11 @@ export function createFastModel(): ChatOpenAI {
   });
 }
 
-export function createStrongModel(): ChatOpenAI {
-  return new ChatOpenAI({
-    model: "gpt-4o",
-    openAIApiKey: requireEnv("AI_INTEGRATIONS_OPENAI_API_KEY"),
-    configuration: {
-      baseURL: requireEnv("AI_INTEGRATIONS_OPENAI_BASE_URL"),
-    },
+export function createStrongModel(): ChatAnthropic {
+  return new ChatAnthropic({
+    model: "claude-sonnet-4-6",
+    apiKey: requireEnv("AI_INTEGRATIONS_ANTHROPIC_API_KEY"),
+    anthropicApiUrl: requireEnv("AI_INTEGRATIONS_ANTHROPIC_BASE_URL"),
     maxRetries: 2,
   });
 }
