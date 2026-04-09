@@ -6,3 +6,9 @@ id = "wtVK-YCO7DL71SsHA7N3f"
 uri = "file://sieve-source.zip"
 type = "unspecified"
 title = "Sieve Source Code (197 files)"
+
+[[outputs]]
+id = "6y65TOd5XQS4f_vRUxAjt"
+uri = "file://artifacts/sieve/public/audit-latest.json"
+type = "unspecified"
+title = "Brain Audit — Full JSON (79KB)"
