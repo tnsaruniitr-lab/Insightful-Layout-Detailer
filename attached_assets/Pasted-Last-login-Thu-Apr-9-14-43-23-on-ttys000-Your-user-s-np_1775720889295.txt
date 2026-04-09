@@ -1,0 +1,53 @@
+Last login: Thu Apr  9 14:43:23 on ttys000
+Your user’s .npmrc file (${HOME}/.npmrc)
+has a `globalconfig` and/or a `prefix` setting, which are incompatible with nvm.
+Run `nvm use --delete-prefix v22.22.0 --silent` to unset it.
+/Users/arunsharma/.openclaw/completions/openclaw.zsh:3685: command not found: compdef
+arunsharma@Aruns-MacBook-Pro ~ % python3 -c "
+import json, pathlib
+p = pathlib.Path.home() / 'Library/Application Support/Claude/claude_desktop_config.json'
+c = json.loads(p.read_text())
+c['mcpServers']['postgres']['env'] = {'NODE_TLS_REJECT_UNAUTHORIZED': '0'}
+p.write_text(json.dumps(c, indent=2))
+print('Saved')
+"
+Saved
+arunsharma@Aruns-MacBook-Pro ~ % tail -3 ~/Library/Logs/Claude/mcp-server-postgres.log
+2026-04-09T07:46:16.869Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+2026-04-09T07:46:20.796Z [postgres] [info] Message from client: {"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT 1;"}},"jsonrpc":"2.0","id":4} { metadata: undefined }
+2026-04-09T07:46:22.472Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":4,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+arunsharma@Aruns-MacBook-Pro ~ % python3 -c "
+import json, pathlib
+p = pathlib.Path.home() / 'Library/Application Support/Claude/claude_desktop_config.json'
+c = json.loads(p.read_text())
+print('env:', c['mcpServers']['postgres'].get('env'))
+print('url:', c['mcpServers']['postgres']['args'][2])
+"
+env: {'NODE_TLS_REJECT_UNAUTHORIZED': '0'}
+url: postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require
+arunsharma@Aruns-MacBook-Pro ~ % tail -3 ~/Library/Logs/Claude/mcp-server-postgres.log
+2026-04-09T07:47:40.303Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+2026-04-09T07:47:42.838Z [postgres] [info] Message from client: {"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT 1;"}},"jsonrpc":"2.0","id":4} { metadata: undefined }
+2026-04-09T07:47:44.592Z [postgres] [info] Message from server: {"jsonrpc":"2.0","id":4,"error":{"code":-32603,"message":"Tenant or user not found"}} { metadata: undefined }
+arunsharma@Aruns-MacBook-Pro ~ % cat ~/Library/Application\ Support/Claude/claude_desktop_config.json
+{
+  "preferences": {
+    "coworkWebSearchEnabled": true,
+    "ccdScheduledTasksEnabled": true,
+    "coworkScheduledTasksEnabled": false,
+    "sidebarMode": "chat"
+  },
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres.aldraxqsqeywluohskhs:Sieve2026XyzAbc@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
+      ],
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+      }
+    }
+  }
+}%                                                                              arunsharma@Aruns-MacBook-Pro ~ % 
