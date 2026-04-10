@@ -28,6 +28,9 @@ const DOMAIN_MAP: Record<string, { org: string; tier: AuthorityTier }> = {
   "microsoft.com":               { org: "Microsoft", tier: "tier1" },
   "docs.microsoft.com":          { org: "Microsoft", tier: "tier1" },
   "learn.microsoft.com":         { org: "Microsoft", tier: "tier1" },
+  // Startup ecosystems — Tier 2
+  "ycombinator.com":             { org: "Y Combinator", tier: "tier2" },
+  "paulgraham.com":              { org: "Paul Graham", tier: "tier2" },
   // Standards bodies — Tier 1
   "w3.org":                      { org: "W3C", tier: "tier1" },
   "schema.org":                  { org: "Schema.org", tier: "tier1" },
