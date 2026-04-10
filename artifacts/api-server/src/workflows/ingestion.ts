@@ -99,6 +99,8 @@ const IngestionState = Annotation.Root({
   persistedPlaybookIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
   persistedAntiPatternIds: Annotation<number[]>({ value: (_prev, next) => next, default: () => [] }),
   docTrustLevel: Annotation<"high" | "medium" | "low">({ value: (_prev, next) => next, default: () => "medium" as const }),
+  docSourceOrg: Annotation<string | null>({ value: (_prev, next) => next, default: () => null }),
+  docSourceUrl: Annotation<string | null>({ value: (_prev, next) => next, default: () => null }),
   status: Annotation<"processing" | "done" | "error">({ value: (_prev, next) => next, default: () => "processing" as const }),
   errorMessage: Annotation<string | null>({ value: (_prev, next) => next, default: () => null }),
 });
@@ -165,6 +167,27 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return normA === 0 || normB === 0 ? 0 : dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+const METADATA_HEADER_REGEX = /Domain:\s*(\w+)\s*\|\s*Source:\s*([^|\n]+?)\s*\|\s*URL:\s*(https?:\/\/[^\s]+)/i;
+
+function parseMetadataHeader(text: string): {
+  domain: string | null;
+  sourceOrg: string | null;
+  sourceUrl: string | null;
+  cleanedText: string;
+} {
+  const match = text.match(METADATA_HEADER_REGEX);
+  if (!match) return { domain: null, sourceOrg: null, sourceUrl: null, cleanedText: text };
+
+  const domain = match[1].trim().toLowerCase();
+  const sourceOrg = match[2].trim();
+  const sourceUrl = match[3].trim();
+
+  let cleanedText = text.replace(match[0], "").replace(/^\[TITLE\]\s*/m, "").trim();
+  if (!cleanedText) cleanedText = text;
+
+  return { domain, sourceOrg, sourceUrl, cleanedText };
+}
+
 async function extractTextNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
   await setProgress(state.documentId, "extracting_text");
   const [doc] = await db.select().from(documentsTable).where(eq(documentsTable.id, state.documentId)).limit(1);
@@ -192,8 +215,29 @@ async function extractTextNode(state: IngestionStateType): Promise<Partial<Inges
   }
 
   const docTrustLevel = (doc.trustLevel ?? "medium") as "high" | "medium" | "low";
-  logger.info({ docId: state.documentId, chars: rawText.length, trustLevel: docTrustLevel }, "Text extracted");
-  return { rawText, docTrustLevel };
+
+  const { domain: embeddedDomain, sourceOrg: embeddedSourceOrg, sourceUrl: embeddedSourceUrl, cleanedText } = parseMetadataHeader(rawText);
+
+  if (embeddedSourceOrg || embeddedSourceUrl || embeddedDomain) {
+    const validDomainTags: DomainTag[] = ["seo", "geo", "aeo", "content", "entity", "general"];
+    const updateFields: Partial<{ domainTag: DomainTag; sourceOrg: string; sourceUrl: string }> = {};
+    if (embeddedDomain && validDomainTags.includes(embeddedDomain as DomainTag)) {
+      updateFields.domainTag = embeddedDomain as DomainTag;
+    }
+    if (embeddedSourceOrg) updateFields.sourceOrg = embeddedSourceOrg;
+    if (embeddedSourceUrl) updateFields.sourceUrl = embeddedSourceUrl;
+    if (Object.keys(updateFields).length > 0) {
+      await db.update(documentsTable).set(updateFields).where(eq(documentsTable.id, state.documentId));
+    }
+    logger.info({ docId: state.documentId, embeddedDomain, embeddedSourceOrg, embeddedSourceUrl }, "Embedded metadata header parsed and applied");
+    rawText = cleanedText;
+  }
+
+  const docSourceOrg = embeddedSourceOrg ?? doc.sourceOrg ?? null;
+  const docSourceUrl = embeddedSourceUrl ?? doc.sourceUrl ?? null;
+
+  logger.info({ docId: state.documentId, chars: rawText.length, trustLevel: docTrustLevel, docSourceOrg }, "Text extracted");
+  return { rawText, docTrustLevel, docSourceOrg, docSourceUrl };
 }
 
 async function chunkDocumentNode(state: IngestionStateType): Promise<Partial<IngestionStateType>> {
@@ -411,6 +455,7 @@ Respond ONLY with valid JSON array, no markdown.`
       confidenceScore: String(applyTrust(item.confidenceScore, state.docTrustLevel)),
       sourceCount: 1,
       sourceRefsJson: JSON.stringify([state.documentId]),
+      sourceOrg: state.docSourceOrg ?? null,
       status: "candidate",
     }).returning();
     if (row) persistedIds.push(row.id);
@@ -493,6 +538,7 @@ Respond ONLY with valid JSON array, no markdown.`
       domainTag: item.domainTag,
       confidenceScore: String(applyTrust(item.confidenceScore, state.docTrustLevel)),
       sourceRefsJson: JSON.stringify([state.documentId]),
+      sourceOrg: state.docSourceOrg ?? null,
       status: "candidate",
     }).returning();
     if (row) persistedIds.push(row.id);
@@ -584,6 +630,7 @@ Respond ONLY with valid JSON array, no markdown.`
       domainTag: item.domainTag,
       confidenceScore: String(applyTrust(item.confidenceScore, state.docTrustLevel)),
       sourceRefsJson: JSON.stringify([state.documentId]),
+      sourceOrg: state.docSourceOrg ?? null,
       status: "candidate",
     }).returning();
     if (row) {
@@ -684,6 +731,7 @@ Respond ONLY with valid JSON array, no markdown.`
       domainTag: item.domainTag,
       riskLevel: item.riskLevel,
       sourceRefsJson: JSON.stringify([state.documentId]),
+      sourceOrg: state.docSourceOrg ?? null,
       status: "candidate",
     }).returning();
     if (row) persistedIds.push(row.id);
