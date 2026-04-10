@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { useCreateBrand, getGetBrandQueryKey } from "@workspace/api-client-react";
+import { getGetBrandQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface BrandContextType {
@@ -9,37 +9,33 @@ interface BrandContextType {
 
 const BrandContext = createContext<BrandContextType | undefined>(undefined);
 
+const FALLBACK_BRAND_ID = 2;
+const API_BASE = (import.meta.env.BASE_URL ?? "").replace(/\/$/, "");
+
 export function BrandProvider({ children }: { children: React.ReactNode }) {
-  const [activeBrandId, setActiveBrandId] = useState<number | null>(() => {
+  const [activeBrandId, setActiveBrandIdState] = useState<number | null>(() => {
     const saved = localStorage.getItem("sieve_active_brand");
-    return saved ? parseInt(saved, 10) : null;
+    return saved ? parseInt(saved, 10) : FALLBACK_BRAND_ID;
   });
-  const createBrand = useCreateBrand();
   const queryClient = useQueryClient();
-  const bootstrapped = useRef(false);
+  const validated = useRef(false);
+
+  const setActiveBrandId = (id: number) => {
+    setActiveBrandIdState(id);
+    localStorage.setItem("sieve_active_brand", id.toString());
+  };
 
   useEffect(() => {
-    if (activeBrandId) {
-      localStorage.setItem("sieve_active_brand", activeBrandId.toString());
-    }
-  }, [activeBrandId]);
-
-  useEffect(() => {
-    if (!activeBrandId && !bootstrapped.current) {
-      bootstrapped.current = true;
-      createBrand.mutate(
-        { data: { name: "Default Brand", icpDescription: "Default ICP for your brand" } },
-        {
-          onSuccess: (brand) => {
-            setActiveBrandId(brand.id);
-            queryClient.invalidateQueries({ queryKey: getGetBrandQueryKey(brand.id) });
-          },
-          onError: () => {
-            bootstrapped.current = false;
-          },
+    if (validated.current || !activeBrandId) return;
+    validated.current = true;
+    fetch(`${API_BASE}/api/brands/${activeBrandId}`)
+      .then((res) => {
+        if (!res.ok) {
+          setActiveBrandId(FALLBACK_BRAND_ID);
+          queryClient.invalidateQueries({ queryKey: getGetBrandQueryKey(FALLBACK_BRAND_ID) });
         }
-      );
-    }
+      })
+      .catch(() => setActiveBrandId(FALLBACK_BRAND_ID));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
