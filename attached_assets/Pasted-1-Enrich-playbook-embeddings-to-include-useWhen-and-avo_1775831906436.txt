@@ -1,0 +1,26 @@
+1. Enrich playbook embeddings to include useWhen and avoidWhen
+
+Right now ingestion.ts:851 embeds playbooks as name + summary. It should be name + summary + useWhen + avoidWhen. This is the biggest single improvement because strategy questions ("when should I do X?") match against useWhen/avoidWhen text, not summaries. Same at line 861, the body text function uses just summary — should include all fields.
+
+2. Fix the rules domain filter bug
+
+knowledgeQA.ts:139 — rules query is missing ${domainClause}. Principles, playbooks, and anti-patterns all filter by domain when the user specifies one. Rules don't. Copy the same pattern.
+
+3. Add query expansion before embedding
+
+In parseQuestionNode, before embedding the raw question, add a fast LLM call that reformulates the question into 2-3 search-optimized phrases. Embed each, retrieve per phrase, merge candidate pools. For example "how do I get more customers?" becomes:
+
+"customer acquisition strategies for startups"
+"growth channels for early stage companies"
+"lead generation and conversion optimization"
+Each sub-query hits different brain objects that the vague original would miss.
+
+4. Include useWhen/avoidWhen in the playbook candidate data passed to scoring
+
+knowledgeQA.ts:178 — the playbook candidate data object only includes name, summary, domainTag, confidenceScore. The re-ranker and synthesis prompt never see useWhen/avoidWhen. Add them to data so the re-ranker can judge playbook relevance properly and the synthesis prompt has the full context.
+
+5. Pass explanation to principle candidates in brand mapping
+
+brandMapping.ts:179-180 — principle candidates in the brand mapping workflow don't include explanation in the data. But knowledgeQA.ts:168 does include it. The brand mapping synthesis prompt never sees principle explanations, only titles and statements. Add explanation to the data object.
+
+These 5 changes fix the actual matching quality. Items 1-2 are quick (change a few lines each). Items 3-5 are moderate. Together they'd make a noticeable difference in what gets retrieved and what the LLM sees when synthesizing.

@@ -893,10 +893,10 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     (r) => `${r.ifCondition} ${r.thenLogic}`
   );
 
-  await dedupeById<{ id: number; name: string; summary: string; sourceRefsJson: string }>(
+  await dedupeById<{ id: number; name: string; summary: string; useWhen: string; avoidWhen: string; sourceRefsJson: string }>(
     "playbooks",
     state.persistedPlaybookIds,
-    (r) => `${r.name} ${r.summary}`,
+    (r) => `${r.name} ${r.summary} ${r.useWhen} ${r.avoidWhen}`.trim(),
     async (existId, existRow, candidate) => {
       const refs = [...new Set([...JSON.parse(existRow.source_refs_json || "[]"), ...JSON.parse(candidate.sourceRefsJson || "[]")])];
       await db.update(playbooksTable).set({ sourceRefsJson: JSON.stringify(refs) }).where(eq(playbooksTable.id, existId));
@@ -904,9 +904,9 @@ async function dedupeAndMergeNode(state: IngestionStateType): Promise<Partial<In
     },
     async (ids) => {
       const rows = await db.select().from(playbooksTable).where(inArray(playbooksTable.id, ids));
-      return rows.map((r) => ({ id: r.id, name: r.name ?? "", summary: r.summary ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
+      return rows.map((r) => ({ id: r.id, name: r.name ?? "", summary: r.summary ?? "", useWhen: r.useWhen ?? "", avoidWhen: r.avoidWhen ?? "", sourceRefsJson: r.sourceRefsJson ?? "[]" }));
     },
-    (r) => r.summary
+    (r) => `${r.summary} ${r.useWhen} ${r.avoidWhen}`.trim()
   );
 
   await dedupeById<{ id: number; title: string; description: string; sourceRefsJson: string }>(

@@ -7,7 +7,7 @@ import {
   queryTracesTable,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { createEmbeddings, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
+import { createEmbeddings, createFastModel, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
 import {
   type ScoredCandidate,
@@ -91,8 +91,36 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, label = "op"): Pr
 
 async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateType>> {
   const embedModel = createEmbeddings();
-  const [embedding] = await withRetry(() => embedModel.embedDocuments([state.input.question]), 2, "embed_question");
-  return { questionEmbedding: embedding };
+  const fastModel = createFastModel();
+
+  let queryPhrases: string[] = [state.input.question];
+  try {
+    const expansionResp = await fastModel.invoke([
+      {
+        role: "system",
+        content: "Return a JSON array of exactly 2 search-optimized phrases that reformulate the user's question for semantic retrieval against a marketing strategy knowledge base. Use domain-specific vocabulary. Return ONLY a JSON array of strings, no explanation.",
+      },
+      { role: "user", content: state.input.question },
+    ]);
+    const raw = typeof expansionResp.content === "string" ? expansionResp.content.trim() : "";
+    const match = raw.match(/\[[\s\S]*?\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]) as string[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        queryPhrases = [state.input.question, ...parsed.slice(0, 2)];
+      }
+    }
+  } catch {
+    // fall back to original question only
+  }
+
+  const embeddings = await Promise.all(
+    queryPhrases.map((q) => withRetry(() => embedModel.embedDocuments([q]), 2, "embed_question"))
+  );
+  const vecs = embeddings.map(([e]) => e);
+  const averaged = vecs[0].map((_, i) => vecs.reduce((sum, v) => sum + v[i], 0) / vecs.length);
+
+  return { questionEmbedding: averaged };
 }
 
 async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAStateType>> {
@@ -116,11 +144,11 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       hasVec ? [vec] : []
     ),
     pool.query<{
-      id: number; name: string; summary: string; domain_tag: string;
-      confidence_score: string | null; source_refs_json: string;
+      id: number; name: string; summary: string; use_when: string | null; avoid_when: string | null;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
       status: string; cosine_dist: number; embedding_vector: string | null;
     }>(
-      `SELECT id, name, summary, domain_tag, confidence_score, source_refs_json, status,
+      `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score, source_refs_json, status,
               ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
        FROM playbooks
        WHERE status IN ('canonical', 'candidate') ${domainClause}
@@ -136,7 +164,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, status,
               ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
        FROM rules
-       WHERE status IN ('canonical', 'candidate')
+       WHERE status IN ('canonical', 'candidate') ${domainClause}
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
        LIMIT 40`,
       hasVec ? [vec] : []
@@ -175,7 +203,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       sourceRefsJson: r.source_refs_json,
       isCanonical: r.status === "canonical",
       embeddingVector: parseEmbedding(r.embedding_vector),
-      data: { name: r.name, summary: r.summary, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json },
+      data: { name: r.name, summary: r.summary, useWhen: r.use_when, avoidWhen: r.avoid_when, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json },
     })),
     ...ruleRows.rows.map((r) => ({
       id: r.id, type: "rule" as const,
