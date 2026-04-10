@@ -80,16 +80,21 @@ export async function fullSyncToSupabase(): Promise<{ synced: Record<string, num
   if (!key) return { synced: {}, skipped: "SUPABASE_SERVICE_KEY not set" };
 
   const [documents, principles, rules, playbooks, antiPatterns, examples, brands] = await Promise.all([
-    pool.query(`SELECT id, title, domain_tag, trust_level, source_type,
-                raw_text_status, error_message, created_at FROM documents`),
+    pool.query(`SELECT id, brand_id, title, source_type, domain_tag, author, source_url,
+                storage_path, raw_text_status, error_message, trust_level, source_org,
+                authority_tier, classifier_confidence, created_at FROM documents`),
     pool.query(`SELECT id, title, statement, explanation, domain_tag, confidence_score,
-                source_count, source_refs_json, status, created_at, updated_at FROM principles`),
+                source_count, source_refs_json, source_org, status, contested,
+                conflict_pair_id, created_at, updated_at FROM principles`),
     pool.query(`SELECT id, name, rule_type, if_condition, then_logic, domain_tag,
-                confidence_score, source_refs_json, status, created_at FROM rules`),
+                confidence_score, source_refs_json, source_org, status, contested,
+                conflict_pair_id, created_at FROM rules`),
     pool.query(`SELECT id, name, summary, use_when, avoid_when, expected_outcomes,
-                domain_tag, confidence_score, source_refs_json, status, created_at, updated_at FROM playbooks`),
+                domain_tag, confidence_score, source_refs_json, source_org, status,
+                contested, conflict_pair_id, created_at, updated_at FROM playbooks`),
     pool.query(`SELECT id, title, description, signals_json, domain_tag, risk_level,
-                source_refs_json, status, created_at FROM anti_patterns`),
+                source_refs_json, source_org, status, contested, conflict_pair_id,
+                created_at FROM anti_patterns`),
     pool.query(`SELECT id, title, description, domain_tag, source_refs_json, created_at FROM examples`),
     pool.query(`SELECT id, name, icp_description, positioning_statement, target_geographies_json, product_truths_json, tone_descriptors_json, created_at FROM brands`),
   ]);
