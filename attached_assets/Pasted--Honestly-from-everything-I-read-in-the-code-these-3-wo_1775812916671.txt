@@ -1,0 +1,16 @@
+
+
+
+Honestly, from everything I read in the code, these 3 would change answer quality noticeably:
+
+1. Embed brand+question for retrieval in QA — This is the single biggest gap. Right now when someone asks "how should my skincare brand approach SEO in India?", the retrieval vector is just the question. It pulls generic SEO principles. But if the brand context (ICP: women 25-35, positioning: clean beauty, geography: India) is embedded alongside the question, the vector search pulls principles about beauty marketing, Indian market dynamics, clean positioning — completely different and far more relevant candidates. Brand mapping already does this. QA doesn't. It's a ~20 line change in workflow ordering and it transforms the relevance of every answer.
+
+2. Include all brain object types in both workflows — Right now QA can't warn you "don't do X" because anti-patterns aren't retrieved. Brand mapping can't ground recommendations in principles because principles aren't retrieved. You have 852 principles, 1,251 rules, 211 playbooks, 733 anti-patterns — but each workflow only sees 2-3 of these 4 types. You're leaving 25-50% of your brain on the table every time. This is literally just adding one more SQL query to each workflow's retrieveAndScoreNode. The diversity caps already handle the balance.
+
+3. Add an "I don't know" threshold — Without this, the system confidently answers questions it has no real knowledge about. If someone asks about podcast marketing and your brain has zero documents on podcasts, the system still returns 12 "best matches" (which are just the least-bad results) and synthesizes a confident-sounding answer from irrelevant objects. A simple check — if the best candidate's similarity is below 0.25, or if the average similarity of the top 12 is below 0.30 — return a structured "insufficient coverage" response with specific gaps. This prevents the #1 trust-killer: answers that sound right but are pulled from unrelated knowledge.
+
+Everything else either improves things incrementally (scoring weights, confidence defaults) or is infrastructure (auth, rate limiting, timeouts). Important, but they don't change whether the answer the user gets is actually good.
+
+These 3 are must-haves because they fix the core retrieval pipeline — which is where answer quality is made or lost. The LLM synthesis is already well-prompted with strict citation rules. The problem isn't synthesis. The problem is what gets fed to the LLM in the first place.
+
+Want me to store these as specs and track them?
