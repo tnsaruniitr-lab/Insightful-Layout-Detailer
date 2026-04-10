@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { UploadDocumentFormDomainTag, UploadDocumentFormTrustLevel } from "@workspace/api-client-react";
 import { Upload, CheckCircle2, AlertCircle, Loader2, X, FileText, Sparkles } from "lucide-react";
 
-const CONCURRENCY = 3;
+const CONCURRENCY = 5;
 const MAX_POLLS = 50;
 const POLL_MS = 3000;
 
@@ -106,7 +106,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
     const all = Array.from(files);
-    const capped = all.slice(0, 15);
+    const capped = all.slice(0, 30);
     const dropped = all.length - capped.length;
     setDroppedCount(dropped > 0 ? dropped : 0);
     const newItems: BulkItem[] = capped.map((file) => ({
@@ -249,7 +249,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
             <Upload className="h-5 w-5" /> Bulk Upload
           </DialogTitle>
           <DialogDescription>
-            Upload up to 15 documents. Authority tier is auto-detected from filename and URL — you can override per row.
+            Upload up to 30 documents. Authority tier is auto-detected from filename and URL — you can override per row.
           </DialogDescription>
         </DialogHeader>
 
@@ -259,7 +259,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
               <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-colors">
                 <Upload className="h-8 w-8 text-muted-foreground mb-2" />
                 <span className="text-sm font-medium">Click to select files</span>
-                <span className="text-xs text-muted-foreground mt-1">PDF, TXT, MD, DOC — up to 15 files</span>
+                <span className="text-xs text-muted-foreground mt-1">PDF, TXT, MD, DOC — up to 30 files</span>
                 <input
                   type="file"
                   className="hidden"
@@ -271,7 +271,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
               {droppedCount > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  {droppedCount} file{droppedCount !== 1 ? "s" : ""} not added — limit is 15.
+                  {droppedCount} file{droppedCount !== 1 ? "s" : ""} not added — limit is 30.
                 </div>
               )}
             </>
