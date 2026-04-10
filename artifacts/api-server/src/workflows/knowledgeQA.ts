@@ -112,7 +112,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
        FROM principles
        WHERE status IN ('canonical', 'candidate') ${domainClause}
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 20`,
+       LIMIT 40`,
       hasVec ? [vec] : []
     ),
     pool.query<{
@@ -125,7 +125,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
        FROM playbooks
        WHERE status IN ('canonical', 'candidate') ${domainClause}
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 20`,
+       LIMIT 40`,
       hasVec ? [vec] : []
     ),
     pool.query<{
@@ -138,7 +138,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
        FROM rules
        WHERE status IN ('canonical', 'candidate')
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 20`,
+       LIMIT 40`,
       hasVec ? [vec] : []
     ),
     pool.query<{
@@ -151,7 +151,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
        FROM anti_patterns
        WHERE status IN ('canonical', 'candidate') ${domainClause}
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 20`,
+       LIMIT 40`,
       hasVec ? [vec] : []
     ),
   ]);
@@ -191,7 +191,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       id: r.id, type: "anti_pattern" as const,
       title: r.title,
       cosineDist: r.cosine_dist ?? 0.5,
-      confidence: 0.7,
+      confidence: 0.4,
       sourceRefsJson: r.source_refs_json,
       isCanonical: r.status === "canonical",
       embeddingVector: parseEmbedding(r.embedding_vector),
@@ -206,6 +206,13 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
     chunkToDocMap,
     targetCount: 12,
     queryLabel: `qa:${state.input.question.slice(0, 40)}`,
+    domainHint: state.input.domainFilter,
+    reranker: {
+      enabled: true,
+      question: state.input.question,
+      brandContext: state.brandContext,
+      model: "gpt-4o-mini",
+    },
   });
 
   return { scoredObjects, scoringTrace };

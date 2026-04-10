@@ -1,5 +1,7 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
+import { invokeSynthesisModel } from "./llm";
+import type { SynthesisModelId } from "./llm";
 
 export type ObjectType = "principle" | "rule" | "playbook" | "anti_pattern";
 
@@ -20,6 +22,7 @@ export interface ScoredCandidate extends ScoringCandidate {
   sourceWeight: number;
   authorityCorroboration: number;
   canonicalBoost: number;
+  domainAffinityBoost: number;
   finalScore: number;
   distinctDocs: number;
 }
@@ -33,6 +36,7 @@ export interface ScoredCandidateSummary {
   sourceWeight: number;
   authorityCorroboration: number;
   canonicalBoost: number;
+  domainAffinityBoost: number;
   finalScore: number;
   distinctDocs: number;
   isCanonical: boolean;
@@ -58,6 +62,7 @@ export interface ScoringTrace {
   timings: {
     scoring_ms: number;
     dedup_ms: number;
+    rerank_ms: number;
     diversity_ms: number;
     total_ms: number;
   };
@@ -65,6 +70,8 @@ export interface ScoringTrace {
   removedByDedup: DedupRemoval[];
   dedupThreshold: number;
   dedupFallbackUsed: boolean;
+  rerankApplied: boolean;
+  rerankCandidateCount: number;
   removedByDiversity: DiversityRemoval[];
   diversityCapApplied: boolean;
   finalSelected: ScoredCandidateSummary[];
@@ -105,6 +112,7 @@ function toSummary(c: ScoredCandidate): ScoredCandidateSummary {
     sourceWeight: +c.sourceWeight.toFixed(4),
     authorityCorroboration: +c.authorityCorroboration.toFixed(4),
     canonicalBoost: +c.canonicalBoost.toFixed(4),
+    domainAffinityBoost: +c.domainAffinityBoost.toFixed(4),
     finalScore: +c.finalScore.toFixed(4),
     distinctDocs: c.distinctDocs,
     isCanonical: c.isCanonical,
@@ -143,7 +151,8 @@ function computeAuthorityCorroboration(docIds: number[], authorityMap: Map<numbe
 
 function scoreCandidates(
   candidates: ScoringCandidate[],
-  authorityMap: Map<number, string>
+  authorityMap: Map<number, string>,
+  domainHint?: string
 ): ScoredCandidate[] {
   return candidates.map((c) => {
     const similarity = Math.max(0, Math.min(1, 1 - c.cosineDist));
@@ -152,13 +161,16 @@ function scoreCandidates(
     const sourceWeight = Math.log(1 + distinctDocs) / Math.log(1 + 5);
     const authorityCorroboration = computeAuthorityCorroboration(docIds, authorityMap);
     const canonicalBoost = c.isCanonical ? 1.0 : 0;
+    const candidateDomain = (c.data as { domainTag?: string | null }).domainTag;
+    const domainAffinityBoost = (domainHint && candidateDomain && candidateDomain === domainHint) ? 1.0 : 0;
     const finalScore =
       0.55 * similarity +
       0.20 * c.confidence +
       0.10 * sourceWeight +
       0.10 * authorityCorroboration +
-      0.05 * canonicalBoost;
-    return { ...c, similarity, sourceWeight, authorityCorroboration, canonicalBoost, finalScore, distinctDocs };
+      0.05 * canonicalBoost +
+      0.05 * domainAffinityBoost;
+    return { ...c, similarity, sourceWeight, authorityCorroboration, canonicalBoost, domainAffinityBoost, finalScore, distinctDocs };
   });
 }
 
@@ -249,6 +261,13 @@ export async function scoreAndSelect(params: {
   totalTraceCount?: number;
   targetCount?: number;
   queryLabel?: string;
+  domainHint?: string;
+  reranker?: {
+    enabled: boolean;
+    question: string;
+    brandContext?: string | null;
+    model?: SynthesisModelId;
+  };
 }): Promise<ScoringResult> {
   const { candidates, targetCount = 12, queryLabel = "query" } = params;
   const totalStart = Date.now();
@@ -259,21 +278,77 @@ export async function scoreAndSelect(params: {
   const authorityMap = await buildAuthorityMap(allDocIds);
 
   const scoreStart = Date.now();
-  const scored = scoreCandidates(candidates, authorityMap);
+  const scored = scoreCandidates(candidates, authorityMap, params.domainHint);
   scored.sort((a, b) => b.finalScore - a.finalScore);
   const scoring_ms = Date.now() - scoreStart;
 
-  const top20BeforeDedup = scored.slice(0, 20).map(toSummary);
+  const top20BeforeDedup = scored.slice(0, 40).map(toSummary);
 
   const dedupStart = Date.now();
   const { kept: deduped, removed: removedByDedup, fallbackUsed: dedupFallbackUsed } =
-    deduplicateByEmbedding(scored, 0.88, false);
+    deduplicateByEmbedding(scored, 0.92, false);
   const dedup_ms = Date.now() - dedupStart;
-  const dedupThreshold = dedupFallbackUsed ? 0.85 : 0.88;
+  const dedupThreshold = dedupFallbackUsed ? 0.85 : 0.92;
+
+  let rerankApplied = false;
+  let rerankCandidateCount = 0;
+  let rerankedDeduped = deduped;
+  const rerankStart = Date.now();
+
+  if (params.reranker?.enabled && deduped.length >= 8) {
+    const sims = deduped.map((c) => c.similarity);
+    const mean = sims.reduce((s, v) => s + v, 0) / sims.length;
+    const variance = sims.reduce((s, v) => s + (v - mean) ** 2, 0) / sims.length;
+    const stddev = Math.sqrt(variance);
+
+    if (stddev > 0.08) {
+      rerankCandidateCount = deduped.length;
+      const candidateLines = deduped.map((c, i) => {
+        const excerpt = (() => {
+          const d = c.data as Record<string, unknown>;
+          if (c.type === "principle") return String(d.statement ?? "").slice(0, 120);
+          if (c.type === "rule") return `IF ${String(d.ifCondition ?? "").slice(0, 80)} THEN ${String(d.thenLogic ?? "").slice(0, 80)}`;
+          if (c.type === "playbook") return String(d.summary ?? "").slice(0, 120);
+          if (c.type === "anti_pattern") return String(d.description ?? "").slice(0, 120);
+          return "";
+        })();
+        return `${i + 1}. [${c.type}:${c.id}] ${c.title} — ${excerpt}`;
+      }).join("\n");
+
+      const brandSection = params.reranker.brandContext ? `\nBrand context: ${params.reranker.brandContext}` : "";
+      const systemPrompt = `You are a relevance re-ranker. Given a question and a list of knowledge objects, return a JSON array of composite keys (format: "type:id") sorted from MOST to LEAST relevant. Include every item. Respond ONLY with a valid JSON array, no markdown.`;
+      const userPrompt = `Question: ${params.reranker.question}${brandSection}\n\nCandidates:\n${candidateLines}`;
+
+      try {
+        const model = params.reranker.model ?? "gpt-4o-mini";
+        const raw = await invokeSynthesisModel(model, systemPrompt, userPrompt, 1);
+        const jsonMatch = raw.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const ranked = JSON.parse(jsonMatch[0]) as string[];
+          const rankIndex = new Map(ranked.map((key, i) => [key, i]));
+          const sorted = [...deduped].sort((a, b) => {
+            const ka = `${a.type}:${a.id}`;
+            const kb = `${b.type}:${b.id}`;
+            const ia = rankIndex.has(ka) ? rankIndex.get(ka)! : deduped.length;
+            const ib = rankIndex.has(kb) ? rankIndex.get(kb)! : deduped.length;
+            return ia - ib;
+          });
+          rerankedDeduped = sorted;
+          rerankApplied = true;
+          logger.info({ queryLabel, stddev: +stddev.toFixed(3), rerankCandidateCount }, "Re-ranker applied");
+        }
+      } catch (err) {
+        logger.warn({ err, queryLabel }, "Re-ranker failed — falling back to score order");
+      }
+    } else {
+      logger.debug({ queryLabel, stddev: +stddev.toFixed(3) }, "Re-ranker skipped: low variance");
+    }
+  }
+  const rerank_ms = Date.now() - rerankStart;
 
   const diversityStart = Date.now();
   const { selected, removed: removedByDiversity, capApplied: diversityCapApplied } =
-    applyDiversity(deduped, targetCount);
+    applyDiversity(rerankedDeduped, targetCount);
   const diversity_ms = Date.now() - diversityStart;
 
   const total_ms = Date.now() - totalStart;
@@ -282,11 +357,13 @@ export async function scoreAndSelect(params: {
     queryLabel,
     totalCandidatesReceived: candidates.length,
     totalTraceCount: params.totalTraceCount ?? 0,
-    timings: { scoring_ms, dedup_ms, diversity_ms, total_ms },
+    timings: { scoring_ms, dedup_ms, rerank_ms, diversity_ms, total_ms },
     top20BeforeDedup,
     removedByDedup,
     dedupThreshold,
     dedupFallbackUsed,
+    rerankApplied,
+    rerankCandidateCount,
     removedByDiversity,
     diversityCapApplied,
     finalSelected: selected.map(toSummary),
@@ -297,12 +374,7 @@ export async function scoreAndSelect(params: {
       queryLabel,
       timings: trace.timings,
       totalCandidates: candidates.length,
-      top20: top20BeforeDedup.map((c) => ({
-        id: c.id, type: c.type, title: c.title.slice(0, 50),
-        similarity: c.similarity, confidence: c.confidence,
-        sourceWeight: c.sourceWeight, authorityCorroboration: c.authorityCorroboration,
-        canonicalBoost: c.canonicalBoost, finalScore: c.finalScore,
-      })),
+      rerankApplied,
       dedup: {
         threshold: dedupThreshold,
         fallbackUsed: dedupFallbackUsed,

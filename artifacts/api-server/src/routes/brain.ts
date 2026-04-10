@@ -371,7 +371,7 @@ router.get("/brain/audit", async (req: Request, res: Response): Promise<void> =>
       byDomain: groupCount(principles, (p) => p.domainTag ?? "general"),
       byStatus: groupCount(principles, (p) => p.status ?? "candidate"),
       byConfidenceBucket: groupCount(principles, (p) => confidenceBucket(p.confidenceScore)),
-      avgConfidence: avg(principles.map((p) => parseFloat(String(p.confidenceScore ?? 0.7)))),
+      avgConfidence: avg(principles.map((p) => parseFloat(String(p.confidenceScore ?? 0.4)))),
       withEmptySourceRefs: principles.filter((p) => safeParseRefs(p.sourceRefsJson ?? "[]").length === 0).length,
       withMultipleSources: principles.filter((p) => safeParseRefs(p.sourceRefsJson ?? "[]").length > 1).length,
       vaguePrinciples: principles
@@ -384,7 +384,7 @@ router.get("/brain/audit", async (req: Request, res: Response): Promise<void> =>
       byDomain: groupCount(rules, (r) => r.domainTag ?? "general"),
       byRuleType: groupCount(rules, (r) => r.ruleType ?? "diagnostic"),
       byStatus: groupCount(rules, (r) => r.status ?? "candidate"),
-      avgConfidence: avg(rules.map((r) => parseFloat(String(r.confidenceScore ?? 0.7)))),
+      avgConfidence: avg(rules.map((r) => parseFloat(String(r.confidenceScore ?? 0.4)))),
       withEmptySourceRefs: rules.filter((r) => safeParseRefs(r.sourceRefsJson ?? "[]").length === 0).length,
       vagueRules: rules
         .filter((r) => isVague(r.ifCondition ?? "") || isVague(r.thenLogic ?? ""))
@@ -395,7 +395,7 @@ router.get("/brain/audit", async (req: Request, res: Response): Promise<void> =>
       total: playbooks.length,
       byDomain: groupCount(playbooks, (p) => p.domainTag ?? "general"),
       byStatus: groupCount(playbooks, (p) => p.status ?? "candidate"),
-      avgConfidence: avg(playbooks.map((p) => parseFloat(String(p.confidenceScore ?? 0.7)))),
+      avgConfidence: avg(playbooks.map((p) => parseFloat(String(p.confidenceScore ?? 0.4)))),
       withEmptySourceRefs: playbooks.filter((p) => safeParseRefs(p.sourceRefsJson ?? "[]").length === 0).length,
       withMissingUseWhen: playbooks.filter((p) => !p.useWhen || p.useWhen.trim().length < 20).length,
     };

@@ -130,7 +130,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
        FROM playbooks
        WHERE status IN ('canonical', 'candidate')
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 20`,
+       LIMIT 40`,
       hasVec ? [vec] : []
     ),
     pool.query<{
@@ -143,7 +143,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
        FROM principles
        WHERE status IN ('canonical', 'candidate')
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 20`,
+       LIMIT 40`,
       hasVec ? [vec] : []
     ),
     pool.query<{
@@ -155,7 +155,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
        FROM anti_patterns
        WHERE status IN ('canonical', 'candidate')
        ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 20`,
+       LIMIT 40`,
       hasVec ? [vec] : []
     ),
   ]);
@@ -182,7 +182,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
     ...apRows.rows.map((r) => ({
       id: r.id, type: "anti_pattern" as const, title: r.title,
       cosineDist: r.cosine_dist ?? 0.5,
-      confidence: 0.7,
+      confidence: 0.4,
       sourceRefsJson: r.source_refs_json,
       isCanonical: r.status === "canonical",
       embeddingVector: parseEmbedding(r.embedding_vector),
@@ -197,6 +197,12 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
     chunkToDocMap,
     targetCount: 12,
     queryLabel: `strategy:${state.input.brandId}`,
+    reranker: {
+      enabled: true,
+      question: "What are the most relevant playbooks, principles, rules, and anti-patterns for this brand's strategic situation?",
+      brandContext: state.brandContext,
+      model: "gpt-4o-mini",
+    },
   });
 
   return { scoredObjects, scoringTrace };
