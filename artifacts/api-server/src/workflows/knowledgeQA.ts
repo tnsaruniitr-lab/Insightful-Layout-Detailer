@@ -101,7 +101,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
 
   const domainClause = state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : "";
 
-  const [principleRows, playbookRows, ruleRows] = await Promise.all([
+  const [principleRows, playbookRows, ruleRows, apRows] = await Promise.all([
     pool.query<{
       id: number; title: string; statement: string; explanation: string | null;
       domain_tag: string; confidence_score: string | null; source_refs_json: string;
@@ -141,6 +141,19 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
        LIMIT 20`,
       hasVec ? [vec] : []
     ),
+    pool.query<{
+      id: number; title: string; description: string; signals_json: string;
+      domain_tag: string; risk_level: string; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, title, description, signals_json, domain_tag, risk_level, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM anti_patterns
+       WHERE status IN ('canonical', 'candidate') ${domainClause}
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
   ]);
 
   const candidates = [
@@ -174,6 +187,16 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       embeddingVector: parseEmbedding(r.embedding_vector),
       data: { name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
     })),
+    ...apRows.rows.map((r) => ({
+      id: r.id, type: "anti_pattern" as const,
+      title: r.title,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: 0.7,
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { title: r.title, description: r.description, signalsJson: r.signals_json, domainTag: r.domain_tag, riskLevel: r.risk_level },
+    })),
   ];
 
   const chunkToDocMap = await buildChunkToDocMap(candidates);
@@ -192,20 +215,47 @@ async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAState
   if (!state.input.brandId || !state.input.useBrandContext) return { brandContext: null };
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
   if (!brand) return { brandContext: null };
-  const context = [
+  const contextParts = [
     brand.name && `Brand: ${brand.name}`,
     brand.icpDescription && `ICP: ${brand.icpDescription}`,
     brand.positioningStatement && `Positioning: ${brand.positioningStatement}`,
     brand.targetGeographiesJson && `Geographies: ${brand.targetGeographiesJson}`,
     brand.productTruthsJson && `Product truths: ${brand.productTruthsJson}`,
-  ].filter(Boolean).join("\n");
-  return { brandContext: context };
+  ].filter(Boolean) as string[];
+  const embedModel = createEmbeddings();
+  const compositeText = contextParts.join("\n") + "\n" + state.input.question;
+  const [embedding] = await withRetry(() => embedModel.embedDocuments([compositeText]), 2, "embed_brand_question");
+  return { brandContext: contextParts.join("\n"), questionEmbedding: embedding };
 }
 
 async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAStateType>> {
+  const LOW_CONFIDENCE_THRESHOLD = 0.25;
+  const topSimilarity = state.scoredObjects.length > 0 ? Math.max(...state.scoredObjects.map((o) => o.similarity)) : 0;
+  const avgSimilarity = state.scoredObjects.length > 0
+    ? state.scoredObjects.reduce((s, o) => s + o.similarity, 0) / state.scoredObjects.length
+    : 0;
+
+  if (topSimilarity < LOW_CONFIDENCE_THRESHOLD || avgSimilarity < 0.15) {
+    logger.info({ topSimilarity, avgSimilarity, question: state.input.question }, "QA: low similarity — returning insufficient knowledge response");
+    return {
+      answer: {
+        knownPrinciples: "The knowledge library does not contain sufficiently relevant information to answer this question.",
+        brandInference: null,
+        uncertainty: "No brain objects with meaningful similarity to this question were found.",
+        missingData: "Documents covering this topic need to be added to the knowledge library before this question can be answered.",
+        rationale: "Insufficient knowledge coverage for this query.",
+        confidence: 0,
+        missingDataSummary: "No relevant knowledge found for this topic.",
+      },
+      lastPrompt: "",
+      lastRawResponse: "",
+    };
+  }
+
   const principles = state.scoredObjects.filter((o) => o.type === "principle");
   const playbooks = state.scoredObjects.filter((o) => o.type === "playbook");
   const rules = state.scoredObjects.filter((o) => o.type === "rule");
+  const antiPatterns = state.scoredObjects.filter((o) => o.type === "anti_pattern");
 
   const principlesContext = principles.map((p) => {
     const d = p.data as { title: string; statement: string; explanation: string | null };
@@ -222,14 +272,19 @@ async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAState
     return `• [R:${r.id}] ${d.name}: IF ${d.ifCondition} THEN ${d.thenLogic}`;
   }).join("\n");
 
+  const antiPatternsContext = antiPatterns.map((a) => {
+    const d = a.data as { title: string; description: string; riskLevel: string };
+    return `• [AP:${a.id}] ${d.title} (risk: ${d.riskLevel}): ${d.description}`;
+  }).join("\n");
+
   const brandSection = state.brandContext ? `\nBrand Context:\n${state.brandContext}` : "";
 
   const systemPrompt = `You are a knowledge retrieval system. Your only job is to answer questions using the structured intelligence objects provided below. You do not have permission to use general marketing knowledge, industry conventions, or anything from outside the provided context.
 
 STRICT RULES:
-1. Use ONLY information explicitly present in the provided principles, playbooks, and rules.
+1. Use ONLY information explicitly present in the provided principles, playbooks, rules, and anti-patterns.
 2. If the context does not contain enough information to answer, say so clearly — do not fill gaps with general knowledge or reasonable-sounding assumptions.
-3. Every claim in "knownPrinciples" and "brandInference" must have an inline citation [P:id], [PB:id], or [R:id]. If you cannot cite it, do not state it.
+3. Every claim in "knownPrinciples" and "brandInference" must have an inline citation [P:id], [PB:id], [R:id], or [AP:id]. If you cannot cite it, do not state it.
 4. "uncertainty" must explicitly name what the provided context does NOT cover — not generic hedging.
 5. Never invent or paraphrase beyond what the source material states.
 
@@ -254,7 +309,10 @@ Available Playbooks:
 ${playbooksContext || "None"}
 
 Available Rules:
-${rulesContext || "None"}`;
+${rulesContext || "None"}
+
+Available Anti-Patterns (things to avoid):
+${antiPatternsContext || "None"}`;
 
   const text = await invokeSynthesisModel(
     state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
@@ -382,9 +440,9 @@ const workflow = new StateGraph(QAState)
   .addNode("synthesize_answer", synthesizeAnswerNode)
   .addNode("persist_run", persistRunNode)
   .addEdge(START, "parse_question")
-  .addEdge("parse_question", "retrieve_and_score")
-  .addEdge("retrieve_and_score", "load_brand_context")
-  .addEdge("load_brand_context", "synthesize_answer")
+  .addEdge("parse_question", "load_brand_context")
+  .addEdge("load_brand_context", "retrieve_and_score")
+  .addEdge("retrieve_and_score", "synthesize_answer")
   .addEdge("synthesize_answer", "persist_run")
   .addEdge("persist_run", END);
 

@@ -126,7 +126,7 @@ async function retrieveAndScoreNode(state: BrandMappingStateType): Promise<Parti
   const hasVec = state.questionEmbedding.length > 0;
   const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
 
-  const [playbookRows, ruleRows, apRows] = await Promise.all([
+  const [playbookRows, ruleRows, apRows, principleRows] = await Promise.all([
     pool.query<{
       id: number; name: string; summary: string; use_when: string | null; avoid_when: string | null;
       domain_tag: string; confidence_score: string | null; source_refs_json: string;
@@ -166,6 +166,19 @@ async function retrieveAndScoreNode(state: BrandMappingStateType): Promise<Parti
        LIMIT 20`,
       hasVec ? [vec] : []
     ),
+    pool.query<{
+      id: number; title: string; statement: string; explanation: string | null;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      status: string; cosine_dist: number; embedding_vector: string | null;
+    }>(
+      `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, status,
+              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
+       FROM principles
+       WHERE status IN ('canonical', 'candidate')
+       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
+       LIMIT 20`,
+      hasVec ? [vec] : []
+    ),
   ]);
 
   const candidates = [
@@ -196,6 +209,15 @@ async function retrieveAndScoreNode(state: BrandMappingStateType): Promise<Parti
       embeddingVector: parseEmbedding(r.embedding_vector),
       data: { title: r.title, description: r.description, signalsJson: r.signals_json, domainTag: r.domain_tag, riskLevel: r.risk_level },
     })),
+    ...principleRows.rows.map((r) => ({
+      id: r.id, type: "principle" as const, title: r.title,
+      cosineDist: r.cosine_dist ?? 0.5,
+      confidence: parseFloat(r.confidence_score ?? "0.7"),
+      sourceRefsJson: r.source_refs_json,
+      isCanonical: r.status === "canonical",
+      embeddingVector: parseEmbedding(r.embedding_vector),
+      data: { title: r.title, statement: r.statement, explanation: r.explanation, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
+    })),
   ];
 
   const chunkToDocMap = await buildChunkToDocMap(candidates);
@@ -211,9 +233,34 @@ async function retrieveAndScoreNode(state: BrandMappingStateType): Promise<Parti
 }
 
 async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
+  const LOW_CONFIDENCE_THRESHOLD = 0.25;
+  const topSimilarity = state.scoredObjects.length > 0 ? Math.max(...state.scoredObjects.map((o) => o.similarity)) : 0;
+  const avgSimilarity = state.scoredObjects.length > 0
+    ? state.scoredObjects.reduce((s, o) => s + o.similarity, 0) / state.scoredObjects.length
+    : 0;
+
+  if (topSimilarity < LOW_CONFIDENCE_THRESHOLD || avgSimilarity < 0.15) {
+    logger.info({ topSimilarity, avgSimilarity, brandId: state.input.brandId }, "BrandMapping: low similarity — returning insufficient knowledge response");
+    return {
+      answer: {
+        knownPrinciples: "The knowledge library does not contain sufficiently relevant information for this brand mapping.",
+        brandInference: "Unable to infer brand-specific intelligence — insufficient knowledge coverage.",
+        uncertainty: "No brain objects with meaningful similarity were found for this brand and question.",
+        missingData: "Documents covering relevant playbooks and principles for this brand's category need to be added.",
+        rationale: "Insufficient knowledge coverage for this brand mapping.",
+        confidence: 0,
+        missingDataSummary: "No relevant knowledge found for this brand mapping.",
+        scoredPlaybooks: [],
+      },
+      lastPrompt: "",
+      lastRawResponse: "",
+    };
+  }
+
   const playbooks = state.scoredObjects.filter((o) => o.type === "playbook");
   const rules = state.scoredObjects.filter((o) => o.type === "rule");
   const antiPatterns = state.scoredObjects.filter((o) => o.type === "anti_pattern");
+  const principles = state.scoredObjects.filter((o) => o.type === "principle");
 
   const playbooksText = playbooks.map((p) => {
     const d = p.data as { name: string; summary: string; useWhen: string | null; avoidWhen: string | null };
@@ -230,12 +277,17 @@ async function scoreFitToBrandNode(state: BrandMappingStateType): Promise<Partia
     return `[AP:${a.id}] ${d.title} (${d.riskLevel} risk): ${d.description}`;
   }).join("\n");
 
+  const principlesText = principles.map((p) => {
+    const d = p.data as { title: string; statement: string; explanation: string | null };
+    return `[P:${p.id}] ${d.title}: ${d.statement}${d.explanation ? ` — ${d.explanation}` : ""}`;
+  }).join("\n");
+
   const systemPrompt = `You are a playbook scoring system. Your job is to score how well each provided playbook fits the given brand, based strictly on the brand context and intelligence library provided. You do not have permission to draw on general marketing knowledge or introduce recommendations not grounded in the provided playbooks and rules.
 
 STRICT RULES:
-1. Score and reason ONLY from the provided playbooks, rules, and brand context — nothing else.
-2. Every claim in "knownPrinciples" and "brandInference" must cite [PB:id] or [R:id]. If you cannot cite it, do not state it.
-3. Do not introduce strategic recommendations that are not grounded in a specific provided playbook or rule.
+1. Score and reason ONLY from the provided playbooks, rules, principles, anti-patterns, and brand context — nothing else.
+2. Every claim in "knownPrinciples" and "brandInference" must cite [PB:id], [R:id], [P:id], or [AP:id]. If you cannot cite it, do not state it.
+3. Do not introduce strategic recommendations that are not grounded in a specific provided playbook, rule, or principle.
 4. If the provided intelligence library does not contain a playbook relevant to an aspect of this brand, name that gap in "missingData" — do not substitute with general marketing advice.
 5. "uncertainty" must reflect genuine gaps in what the provided context covers — not generic hedging.
 6. playbookId values in scoredPlaybooks must only be IDs from the provided playbook list.
@@ -274,11 +326,17 @@ Respond ONLY with valid JSON, no markdown.`;
 
 Question: ${state.input.question}
 
-Available Playbooks:\n${playbooksText || "None"}
+Available Principles:
+${principlesText || "None"}
 
-Available Rules:\n${rulesText || "None"}
+Available Playbooks:
+${playbooksText || "None"}
 
-Likely Anti-Patterns to Watch:\n${apText || "None"}`;
+Available Rules:
+${rulesText || "None"}
+
+Likely Anti-Patterns to Watch:
+${apText || "None"}`;
 
   const text = await invokeSynthesisModel(
     state.input.synthesisModel ?? DEFAULT_SYNTHESIS_MODEL,
