@@ -1,0 +1,93 @@
+Sample 1: Single-topic page that fits in one chunk
+API upload fields:
+
+title:      "Robots.txt – Syntax and Directives"
+domainTag:  "seo"
+sourceUrl:  "https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt"
+trustLevel: "high"
+sourceType: "web_import"
+
+Document body (~320 words):
+
+Robots.txt is a plain text file placed at the root of a website that tells search engine crawlers which URLs they are allowed or disallowed from accessing. Every major search engine respects the robots exclusion protocol. Google treats robots.txt directives as binding — if a URL is disallowed, Googlebot will not crawl it.
+
+A robots.txt file must be located at the site root (e.g., https://example.com/robots.txt). If the file is placed in a subdirectory, crawlers will not discover it. If Google cannot fetch the robots.txt file due to a server error (5xx status), it will temporarily halt all crawling of the site as a precaution. If the file returns a 404, Google assumes no crawl restrictions exist and will crawl all accessible URLs.
+
+The file uses two primary directives: User-agent specifies which crawler the rules apply to, and Disallow specifies a URL path that should not be crawled. A wildcard User-agent (*) applies rules to all crawlers. Multiple User-agent groups can exist in one file, and the most specific matching group takes precedence for each crawler.
+
+To configure robots.txt correctly:
+
+Create a UTF-8 encoded plain text file named robots.txt.
+Place it at the site root so it is accessible at the canonical domain with protocol.
+Add a User-agent directive specifying the target crawler or wildcard.
+Add Disallow directives for paths that should not be crawled.
+Optionally add a Sitemap directive pointing to the XML sitemap URL.
+Test the file using the robots.txt Tester in Google Search Console before deploying.
+Do not use robots.txt to hide pages from Google Search results — disallowed pages can still appear in search results if other pages link to them. The URL will appear without a snippet or cached version. To remove a page from search results entirely, use a noindex meta tag or X-Robots-Tag HTTP header instead, and ensure the page is not disallowed so Googlebot can discover the noindex directive.
+
+Why this works for the pipeline:
+
+Brain Object Type	What the Sieve LLM will extract
+Principle	"Google treats robots.txt directives as binding" — universal truth, declarative
+Rule	"IF robots.txt returns 5xx → THEN Google halts all crawling temporarily" / "IF 404 → THEN Google assumes no restrictions"
+Playbook	The 6 numbered steps for configuring robots.txt
+Anti-pattern	"Do not use robots.txt to hide pages from search results — disallowed pages can still appear if linked" with the signal (URL appearing without snippet) and consequence
+Sample 2: A page that gets split into two documents
+A page about canonicalization is ~800 words. The crawler splits at the H2 boundary into two docs:
+
+Doc 2a
+API upload fields:
+
+title:      "Canonicalization – How Google Selects Canonical URLs"
+domainTag:  "seo"
+sourceUrl:  "https://developers.google.com/search/docs/crawling-indexing/canonicalization"
+trustLevel: "high"
+
+Document body (~290 words):
+
+Canonicalization is the process by which Google selects a single representative URL for a set of duplicate or near-duplicate pages. When multiple URLs serve substantially similar content, Google groups them into a cluster and chooses one as the canonical URL. Only the canonical URL is regularly crawled and indexed; the duplicates are crawled less frequently.
+
+Google evaluates multiple signals to determine the canonical URL. These include whether the URL is served over HTTPS rather than HTTP, the presence of a rel="canonical" link element or HTTP header, redirects pointing to the URL, the URL appearing in the sitemap, and the volume of internal links pointing to the URL. No single signal is determinitive — Google uses a weighted combination and may select a different canonical than the one the site owner specifies.
+
+If a site specifies a rel="canonical" pointing to URL A, but Google's signals strongly favour URL B, Google will select URL B as canonical. The rel="canonical" element is treated as a strong hint, not a directive.
+
+If conflicting canonical signals exist across a duplicate cluster — for example, page A canonicalises to page B while page B canonicalises to page A — Google will ignore the contradictory signals and select a canonical based on its own evaluation of remaining factors.
+
+If a page has no explicit canonical signal and no duplicates, it is its own canonical by default. Site owners do not need to add self-referencing canonical tags, though doing so is harmless and considered a defensive best practice by most SEO practitioners.
+
+Doc 2b
+API upload fields:
+
+title:      "Canonicalization – Implementation and Common Mistakes"
+domainTag:  "seo"
+sourceUrl:  "https://developers.google.com/search/docs/crawling-indexing/canonicalization#implementation"
+trustLevel: "high"
+
+Document body (~310 words):
+
+To implement canonicalization correctly for a site:
+
+Identify all duplicate and near-duplicate URL clusters using a crawling tool or the URL Inspection tool in Search Console.
+Choose one preferred URL per cluster based on HTTPS, clean URL structure, and consistency with internal linking.
+Add a rel="canonical" link element in the HTML head of every duplicate page pointing to the preferred URL.
+Ensure the canonical target URL returns a 200 status code and is not itself redirected, blocked by robots.txt, or marked noindex.
+Add the canonical URLs to the XML sitemap and omit the duplicate variants.
+Use 301 redirects from retired duplicate URLs to the canonical URL where possible.
+If the canonical target URL is blocked by robots.txt, Google cannot verify it and will ignore the canonical hint. Always ensure canonical targets are crawlable.
+
+If rel="canonical" points to a page with substantially different content, Google will ignore the hint because the pages are not true duplicates. Canonical should only be used across pages serving the same or very similar content.
+
+Do not use rel="canonical" across different domains unless the content is genuinely identical and the site owner controls both properties. Cross-domain canonicals are treated with lower confidence and are frequently ignored when the content diverges even slightly.
+
+Do not create canonical chains where page A points to page B and page B points to page C. Google may follow one hop but long chains introduce ambiguity. Always point canonical directly to the final preferred URL.
+
+Do not place rel="canonical" in the body of the HTML document. It must appear in the head section to be recognised. If injected via JavaScript, Google's renderer will discover it, but processing delays increase and reliability decreases compared to server-rendered placement in the head.
+
+Key Format Principles
+~300-500 words per doc — lands in 1-2 chunks, nothing truncated
+No MUST/SHOULD/AVOID vocabulary — plain declarative English that the pipeline's Claude Sonnet will parse into brain objects using its own prompts
+IF/THEN patterns written naturally — "If robots.txt returns 5xx, Google halts crawling" — the Rule extractor will pick these up
+Numbered steps present explicitly — the Playbook extractor looks for 3+ sequential actions
+"Don't do X because Y" patterns for anti-patterns — written naturally with signals and consequences
+Universal truths stated declaratively — "Google treats robots.txt as binding" — the Principle extractor finds these
+Does this format look right? Want me to adjust anything before I build?
