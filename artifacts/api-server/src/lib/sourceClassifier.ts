@@ -50,6 +50,7 @@ const DOMAIN_MAP: Record<string, { org: string; tier: AuthorityTier }> = {
   "surfer.seo":                  { org: "Surfer SEO", tier: "tier2" },
   "clearscope.io":               { org: "Clearscope", tier: "tier2" },
   "marketingmemo.com":           { org: "Marketing Memo", tier: "tier2" },
+  "thedigitalbloom.com":         { org: "The Digital Bloom", tier: "tier2" },
 };
 
 function extractDomain(url: string): string | null {
