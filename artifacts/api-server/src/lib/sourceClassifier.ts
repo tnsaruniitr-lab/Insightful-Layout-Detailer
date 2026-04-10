@@ -42,6 +42,7 @@ const DOMAIN_MAP: Record<string, { org: string; tier: AuthorityTier }> = {
   "backlinko.com":               { org: "Backlinko", tier: "tier2" },
   "neilpatel.com":               { org: "Neil Patel", tier: "tier2" },
   "hubspot.com":                 { org: "HubSpot", tier: "tier2" },
+  "blog.hubspot.com":            { org: "HubSpot", tier: "tier2" },
   "contentmarketinginstitute.com": { org: "Content Marketing Institute", tier: "tier2" },
   "brightedge.com":              { org: "BrightEdge", tier: "tier2" },
   "conductor.com":               { org: "Conductor", tier: "tier2" },
