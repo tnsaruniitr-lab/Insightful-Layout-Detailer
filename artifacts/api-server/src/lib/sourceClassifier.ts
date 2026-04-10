@@ -51,6 +51,10 @@ const DOMAIN_MAP: Record<string, { org: string; tier: AuthorityTier }> = {
   "clearscope.io":               { org: "Clearscope", tier: "tier2" },
   "marketingmemo.com":           { org: "Marketing Memo", tier: "tier2" },
   "thedigitalbloom.com":         { org: "The Digital Bloom", tier: "tier2" },
+  "cxl.com":                     { org: "CXL", tier: "tier2" },
+  // Marketing agencies / lower-authority blogs — Tier 3
+  "amsive.com":                  { org: "Amsive", tier: "tier3" },
+  "naganamedia.com":             { org: "Nagan Media", tier: "tier3" },
 };
 
 function extractDomain(url: string): string | null {
