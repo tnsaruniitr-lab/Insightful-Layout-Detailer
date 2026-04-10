@@ -1,0 +1,21 @@
+[TITLE]
+2025 B2B GTM: Channel Benchmarks & Winning Motions
+
+Domain: general | Source: thedigitalbloom.com | URL: https://thedigitalbloom.com/learn/b2b-gtm-2025-benchmarks
+
+Research indicates that successful 2025 B2B go-to-market strategies prioritize intent-based outbound, Account-Based Marketing (ABM) with aligned sales and marketing ownership, Answer Engine Optimization (AEO), and data-driven PartnerOps. According to 2025 GTM benchmark data, LinkedIn currently offers the highest return on ad spend (ROAS) and is considered the most efficient platform for influencing target companies.
+
+Requirements:
+SHOULD: Target >65% PLG activation rate for product-led growth motions
+SHOULD: Prioritize intent-based outbound as a core GTM strategy
+SHOULD: Implement Account-Based Marketing with aligned sales and marketing ownership
+SHOULD: Focus on Answer Engine Optimization (AEO) for content strategy
+SHOULD: Utilize data-driven PartnerOps for ecosystem growth
+
+Restrictions:
+AVOID: Spreading resources across too many initiatives instead of optimizing core motions
+
+Implementation:
+1. Focus on optimizing core motions like PLG activation
+2. Refine intent-based outbound processes
+3. Utilize tools that support AEO and partner ecosystem forecasting

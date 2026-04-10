@@ -1,0 +1,33 @@
+[TITLE]
+AI Adoption in GTM: From "What Can I Do?" to "Show Me ROI"
+
+Domain: seo | Source: thedigitalbloom.com | URL: https://thedigitalbloom.com/learn/b2b-gtm-2025-benchmarks
+
+AI adoption in B2B GTM has moved from experimentation to operational necessity, with 74% of companies reporting a top-down AI adoption mandate. However, only 24% report a "big impact from AI," while 53% see either no impact or limited impact. This gap between adoption and impact defines the 2025 AI landscape—universal tools but variable execution.
+
+Requirements:
+MUST: Focus AI investment on proven use cases: intent-driven outbound, data enrichment, and account insights
+MUST: Develop AI fluency as it has transitioned from optional to required for GTM professionals
+MUST: Include prompt engineering, workflow automation, data analysis, and tool integration alongside traditional marketing and sales capabilities
+
+SHOULD: Deploy ChatGPT as the #1 most impactful GTM tool with 91% of companies using mainstream AI tools
+SHOULD: Implement intent-driven outbound (79% report increased revenue)
+SHOULD: Use AI for competitor analysis (50%+ adoption) and account insights (55%+ adoption)
+SHOULD: Leverage data enrichment for improved ICP targeting (60%+ adoption)
+SHOULD: Consider Clay for finding unique data and running intent-based campaigns
+SHOULD: Increase investment in AI search/AEO (51% plan to increase investment)
+
+Restrictions:
+AVOID: Full-AI SDR automation—multiple survey respondents reported "We tried an AI SDR for six months and were unable to generate a single opportunity"
+AVOID: Expecting direct business outcomes from content use cases, which show time savings but limited revenue impact
+
+Implementation:
+1. Deploy mainstream AI tools like ChatGPT for general-purpose work (91% adoption baseline)
+2. Implement custom GPTs (56% have deployed) for specific use cases
+3. Focus on three high-impact categories: outbound automation, market intelligence, and content marketing
+4. Build technical GTM capabilities combining traditional expertise with workflow automation skills
+
+Caveats:
+- Complex implementations like multi-agent workflows remain challenging (only 21% implementing)
+- Content marketing AI shows gap between adoption and revenue impact despite widespread use
+- Manual oversight remains critical for authentic engagement in outbound activities

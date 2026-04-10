@@ -1,0 +1,24 @@
+# 2025 B2B GTM: Channel Benchmarks & Winning Motions – Account-Based Marketing: Maturity Brings Consistent Performance
+
+Domain: general | Source: thedigitalbloom.com | URL: https://thedigitalbloom.com/learn/b2b-gtm-2025-benchmarks
+
+Account-based marketing has transitioned from emerging strategy to operational standard, with 94% of B2B marketers now employing ABM in some form. This near-universal adoption reflects proven performance: 87% of B2B marketers report that ABM initiatives outperform other marketing investments in terms of ROI. The maturity of ABM programs directly correlates with impact—mature ABM programs contribute to 79% of all sales opportunities.
+
+Requirements:
+MUST: Align sales and marketing teams for ABM success - companies with synced teams are 67% better at closing deals
+MUST: Implement unified tech stacks, shared data platforms, and joint success metrics for ABX evolution
+MUST: Measure joint KPIs across sales, marketing, and revenue operations including partner-sourced pipeline, co-sell impact, partner-influenced revenue, and activation rates
+
+SHOULD: Dedicate 18-20% of marketing budget to ABM - top performers average 18% compared to 14% for less successful marketers
+SHOULD: Combine ABM with Account-Based Advertising (ABA) to achieve 60% higher win rates
+SHOULD: Focus on partner-sourced opportunities which boast the highest win rates across all GTM motions when combined with ABM approaches
+
+Implementation:
+1. Transition from single-player ABM (marketing-only) to multiplayer ABX (cross-functional orchestration around target accounts)
+2. Integrate account-based marketing, account-based sales, and account-based customer success into a unified strategy
+3. Establish shared success metrics across all functions involved in account management
+
+Caveats:
+- The 2026 imperative requires moving beyond traditional ABM to orchestrated ABX approaches
+- Complete ABM programs are necessary for maximum ROI - 63% of companies with complete programs report at least 25% ROI, while 46% see returns of at least 50%
+- Revenue growth potential of 208% and annual contract value boost of 170% require strategic investment rather than viewing ABM as an expense

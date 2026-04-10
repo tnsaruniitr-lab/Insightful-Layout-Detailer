@@ -1,0 +1,28 @@
+[TITLE]
+2025 B2B GTM: Channel Benchmarks & Winning Motions
+
+Domain: general | Source: thedigitalbloom.com | URL: https://thedigitalbloom.com/learn/b2b-gtm-2025-benchmarks
+
+After a year of aggressive experimentation, B2B companies face a critical inflection point. The average software company now runs five core GTM channels plus 5.5 experimental initiatives—a total of 10.5 simultaneous GTM efforts that is proving unsustainable for most teams. Research from 195 software companies reveals that 36% of GTM leaders cite "scaling GTM motions and pipeline" as their top challenge, signaling an industry-wide shift from exploration to execution.
+
+Requirements:
+MUST: Prioritize intent-based outbound and Account-Based Marketing (ABM) with joint sales/marketing pipeline ownership
+MUST: Leverage LinkedIn for optimal ROAS and cost-per-company influenced
+MUST: Invest in Answer Engine Optimization (AEO) and search-driven tactics
+MUST: Target >65% activation rate for Product-Led Growth (PLG)
+
+Restrictions:
+AVOID: Paid Meta (low ROI for B2B pipeline)
+AVOID: Non-branded paid search (unless proven in segment)
+AVOID: Mass AI SDR automation without manual oversight for engagement
+
+Implementation:
+1. Double down on intent-based outbound using timeline hooks rather than problem hooks for reply rates
+2. Optimize activation in Product-Led Growth (PLG) to achieve >65% activation rate
+3. Implement data-driven PartnerOps for partner ecosystem forecasting
+4. Exit underperforming channels including Paid Meta and non-branded paid search
+
+Caveats:
+- There is no correlation between GTM motion and growth rate—every motion can work when executed properly
+- Performance of individual channels within motions has diverged sharply, requiring strategic prioritization
+- The six dominant GTM motions (Inbound, Outbound, Product-led growth, Account-based, Paid digital, and Partners) all require proper execution regardless of selection
