@@ -1,0 +1,64 @@
+This is excellent — Sieve is way more built out than expected. Here's the full picture:
+
+What Sieve Already Has (BUILT ✅)
+All 3 API Endpoints Exist and Work:
+Endpoint	Status	What it does
+POST /api/brain/ask	✅ Built	LangGraph workflow: embed question → vector search all 4 brain tables → score/rank → LLM synthesis with inline citations
+POST /api/brain/map-brand	✅ Built	Scores playbooks against brand on 6 dimensions (ICP fit, offer fit, geography, funnel, category, strategic leverage)
+POST /api/brain/where-to-start	✅ Built	Produces 3-5 strategic themes with playbook + anti-pattern mappings
+Response Format — Already Has Everything We Need:
+{
+  confidence: 0.82,
+  sections: {
+    knownPrinciples: "...[P:id], [R:id] citations inline...",
+    uncertainty: "...",
+    missingData: "..."
+  },
+  source_refs: [{ sourceType, sourceId, title, domainTag, confidence }],
+  scoring_trace: { ... }
+}
+
+source_refs ✅, confidence ✅, sections ✅, inline citations ✅ — all present.
+
+Retrieval Pipeline — Sophisticated:
+pgvector with HNSW indexes on all brain tables
+Query expansion: question → 3 search phrases via GPT-4o-mini → averaged embedding
+Scoring: 55% similarity + 20% confidence + 10% source weight + 10% authority + 5% canonical + 5% domain
+Dedup at 0.92 cosine similarity
+LLM re-ranking when variance is high
+Diversity caps so one type doesn't dominate
+~12 objects returned per query
+Auth:
+Brain endpoints are currently open (no auth)
+Some admin endpoints use x-audit-key
+What This Means for the Planner
+Almost nothing needs to change. Here's the gap analysis:
+Planner Expects	Sieve Has	Gap?
+source_refs with IDs	✅ Returns sourceId, sourceType, title	None
+confidence score	✅ Returns 0-1 confidence	None
+sections.knownPrinciples	✅ With inline [P:id] citations	None
+sections.uncertainty	✅ Present	None
+sections.missingData	✅ Present	None
+brandContext inline in payload	❌ Uses brandId lookup only	Minor gap — Sieve loads brand from its own DB, not inline context
+API key auth	❌ Endpoints are open	Minor gap — fine for dev, need for production
+synthesisModel param	✅ Supports Claude, GPT-4o, Gemini	None
+The only real gap:
+The planner sends brandId and Sieve looks up the brand from its own local PostgreSQL (not Supabase directly). Sieve then syncs to Supabase one-way. So the brand data the planner writes to Supabase may not be in Sieve's local DB.
+
+Fix: Either:
+
+A) Planner creates brands via Sieve's POST /api/brands endpoint (so brand lives in Sieve's DB first)
+B) Add brandContext inline support to Sieve's endpoints (so planner sends full context)
+C) Run Sieve's sync in reverse (Supabase → Sieve local)
+Option A is simplest — planner does intake, calls Sieve to create/update the brand, then all brain queries use that brand.
+
+Updated Next Steps
+#	Step	Who	Effort
+1	Get the Sieve Replit URL	You share it	0 min
+2	Test /api/healthz	Me	1 min
+3	Test /api/brain/ask with a real question	Me	2 min
+4	Create/update brand via Sieve's POST /api/brands	Me (during intake)	5 min
+5	Run full planner flow — intake → diagnostic (4 calls) → plan	Me	15 min
+The system is basically ready to test end-to-end. Sieve has everything built. The planner skill just needs the URL.
+
+What's your Sieve Replit URL?
