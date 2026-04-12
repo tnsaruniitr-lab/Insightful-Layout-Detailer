@@ -1,0 +1,85 @@
+Now let me check what Sieve's local DB schema looks like for brands:
+
+
+Ran a command, read a file
+Ran a command, read a file
+
+Found significant mismatches. Here's the full picture:
+
+Mismatch Report: Supabase vs Sieve Local DB
+Schema Comparison
+Field	Supabase (shared)	Sieve Local DB	Match?
+id	✅ integer	✅ serial	✅
+name	✅ text	✅ text	✅
+icp_description	✅ text	✅ text	✅
+positioning_statement	✅ text	✅ text	✅
+target_geographies_json	✅ text	✅ text	✅
+product_truths_json	✅ text	✅ text	✅
+tone_descriptors_json	✅ text	✅ text	✅
+created_at	✅ timestamptz	✅ timestamptz	✅
+updated_at	✅ timestamptz	✅ timestamptz	✅
+stage	✅ text	❌ MISSING	🔴
+category	✅ text	❌ MISSING	🔴
+monthly_budget	✅ text	❌ MISSING	🔴
+team_size	✅ text	❌ MISSING	🔴
+current_channels	✅ text[]	❌ MISSING	🔴
+website_url	✅ text	❌ MISSING	🔴
+key_metric_mrr	✅ numeric	❌ MISSING	🔴
+key_metric_retention	✅ numeric	❌ MISSING	🔴
+key_metric_trial_to_paid	✅ numeric	❌ MISSING	🔴
+profile_sections	✅ jsonb	❌ MISSING	🔴
+9 columns exist in Supabase that Sieve doesn't have. These are the fields the planner added during intake enrichment.
+
+Data Comparison — TRYPS (id: 2)
+Field	Supabase Value	Sieve Local Value	Match?
+name	TRYPS	tryps	🟡 Case mismatch
+icp_description	"Groups of friends organizing various types of trips..."	"young group travellers"	🔴 Different content
+positioning_statement	"A group trip planning app your friends actually use"	"group travel planning app...plan, book, split expenses"	🔴 Different content
+target_geographies_json	["united states"]	["united states"]	✅
+product_truths_json	[]	[]	✅
+tone_descriptors_json	["conversational","practical","relatable","direct","friendly"]	["fun","modern","agentic"]	🔴 Completely different
+stage	null (was pre_launch, got overwritten?)	doesn't exist	🔴
+category	"Group Trip Planning Software"	doesn't exist	🔴
+monthly_budget	"<5k"	doesn't exist	🔴
+team_size	"2-5"	doesn't exist	🔴
+website_url	"https://trypsagent.com"	doesn't exist	🔴
+updated_at	Apr 12 12:25	Apr 10 17:12	🟡 Supabase newer
+What This Means
+Problem 1: Sieve can't use the planner's enriched fields
+
+When Sieve does brandId: 2 lookup, it gets:
+
+name, icp, positioning, geographies, product truths, tone — the original 7 fields
+It does NOT get:
+
+stage, category, budget, team_size, channels, website, metrics — the 9 fields that drive plan quality
+So when I called /brain/ask with brandId: 2, useBrandContext: true, Sieve was building context from an incomplete profile. The diagnostic was brand-aware but missing the most important signals (stage, budget, team size).
+
+Problem 2: The data that DOES overlap is out of sync
+
+Someone (likely you via Sieve directly or another tool) updated the Supabase brand with different ICP, positioning, and tone. The planner also updated it during intake. Sieve's local DB has older/different values.
+
+Problem 3: The stage field was nulled out
+
+I set stage = 'pre_launch' during intake, but the current Supabase value shows null. Something overwrote it — possibly the Sieve sync pushed older data back, or another process updated the brand.
+
+Why brandContext Inline Fixes All of This
+This is exactly why the brandContext spec you wrote is critical:
+
+Problem	How brandContext fixes it
+Sieve missing 9 columns	Planner sends all fields as text — no schema change needed on Sieve
+Data out of sync	Planner sends current state — no sync dependency
+Stage/budget/metrics not available to Sieve	Included in the brandContext string
+Different ICP/tone values	Planner sends what it knows, overrides stale Sieve data
+Immediate Actions
+#	Action	Who
+1	Ship the brandContext inline spec to Sieve	You → Replit agent
+2	Decide: should Sieve's brand schema also get the 9 missing columns?	You — if you want brandId path to also work fully
+3	Fix the TRYPS brand data in Supabase — the stage is null and ICP/tone were overwritten	Me — once you confirm which values are correct
+4	Decide the sync direction — should Sieve → Supabase sync overwrite planner enrichments?	You — this is an architecture decision
+The sync direction is the biggest open question: Sieve currently pushes TO Supabase. If it pushes a brand that's missing stage/budget/metrics, it will wipe out the planner's enrichments. Need to either:
+
+A) Make Sieve's sync smart (don't overwrite fields it doesn't own)
+B) Stop syncing brands entirely (each side owns its own data)
+C) Add the 9 columns to Sieve's schema too (both sides fully aligned)
+What's your call?
