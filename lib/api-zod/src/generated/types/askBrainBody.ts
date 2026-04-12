@@ -11,6 +11,7 @@ import type { SynthesisModelId } from "./synthesisModelId";
 export interface AskBrainBody {
   question: string;
   brandId?: number;
+  brandContext?: string;
   domainFilter?: AskBrainBodyDomainFilter;
   useBrandContext?: boolean;
   synthesisModel?: SynthesisModelId;

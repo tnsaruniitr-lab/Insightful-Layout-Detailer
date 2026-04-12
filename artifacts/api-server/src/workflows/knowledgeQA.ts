@@ -29,6 +29,7 @@ interface SourceRef {
 interface QAInput {
   question: string;
   brandId?: number;
+  brandContext?: string;
   domainFilter?: string;
   useBrandContext?: boolean;
   synthesisModel?: SynthesisModelId;
@@ -247,6 +248,12 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
 }
 
 async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAStateType>> {
+  if (state.input.brandContext) {
+    const embedModel = createEmbeddings();
+    const compositeText = state.input.brandContext + "\n" + state.input.question;
+    const [embedding] = await withRetry(() => embedModel.embedDocuments([compositeText]), 2, "embed_brand_question");
+    return { brandContext: state.input.brandContext, questionEmbedding: embedding };
+  }
   if (!state.input.brandId || !state.input.useBrandContext) return { brandContext: null };
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
   if (!brand) return { brandContext: null };

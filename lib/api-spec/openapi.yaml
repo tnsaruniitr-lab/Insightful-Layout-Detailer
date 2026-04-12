@@ -1236,6 +1236,8 @@ components:
           type: string
         brandId:
           type: integer
+        brandContext:
+          type: string
         domainFilter:
           type: string
           enum: [seo, geo, aeo, content, entity, general]
@@ -1251,12 +1253,13 @@ components:
       properties:
         brandId:
           type: integer
+        brandContext:
+          type: string
         question:
           type: string
         synthesisModel:
           $ref: "#/components/schemas/SynthesisModelId"
       required:
-        - brandId
         - question
 
     WhereToStartBody:
@@ -1264,10 +1267,10 @@ components:
       properties:
         brandId:
           type: integer
+        brandContext:
+          type: string
         synthesisModel:
           $ref: "#/components/schemas/SynthesisModelId"
-      required:
-        - brandId
 
     # ── Run schemas ───────────────────────────────────────────────────────
     MappingRun:

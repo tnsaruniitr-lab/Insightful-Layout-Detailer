@@ -8,7 +8,8 @@
 import type { SynthesisModelId } from "./synthesisModelId";
 
 export interface MapBrandBody {
-  brandId: number;
+  brandId?: number;
+  brandContext?: string;
   question: string;
   synthesisModel?: SynthesisModelId;
 }

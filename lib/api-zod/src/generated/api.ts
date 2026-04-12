@@ -372,6 +372,7 @@ export const ListExamplesResponse = zod.array(ListExamplesResponseItem);
 export const AskBrainBody = zod.object({
   question: zod.string(),
   brandId: zod.number().optional(),
+  brandContext: zod.string().optional(),
   domainFilter: zod
     .enum(["seo", "geo", "aeo", "content", "entity", "general"])
     .optional(),
@@ -441,7 +442,8 @@ export const AskBrainResponse = zod.object({
  * @summary Map brain intelligence to a specific brand
  */
 export const MapBrandBody = zod.object({
-  brandId: zod.number(),
+  brandId: zod.number().optional(),
+  brandContext: zod.string().optional(),
   question: zod.string(),
   synthesisModel: zod
     .enum([
@@ -508,7 +510,8 @@ export const MapBrandResponse = zod.object({
  * @summary Get strategy starting recommendations for a brand
  */
 export const GetBrandStrategyBody = zod.object({
-  brandId: zod.number(),
+  brandId: zod.number().optional(),
+  brandContext: zod.string().optional(),
   synthesisModel: zod
     .enum([
       "gpt-4o",

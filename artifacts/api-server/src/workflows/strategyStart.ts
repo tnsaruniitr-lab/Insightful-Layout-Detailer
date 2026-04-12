@@ -28,7 +28,8 @@ interface SourceRef {
 }
 
 interface StrategyInput {
-  brandId: number;
+  brandId?: number;
+  brandContext?: string;
   synthesisModel?: SynthesisModelId;
 }
 
@@ -97,6 +98,12 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, label = "op"): Pr
 }
 
 async function loadBrandContextNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
+  if (state.input.brandContext) {
+    const embedModel = createEmbeddings();
+    const [embedding] = await withRetry(() => embedModel.embedDocuments([state.input.brandContext!]), 2, "embed_brand_strategy");
+    return { brandContext: state.input.brandContext, brandEmbedding: embedding };
+  }
+  if (!state.input.brandId) throw new Error("Either brandId or brandContext must be provided");
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
   if (!brand) throw new Error(`Brand ${state.input.brandId} not found`);
   const competitors = await db.select().from(competitorsTable).where(eq(competitorsTable.brandId, state.input.brandId));

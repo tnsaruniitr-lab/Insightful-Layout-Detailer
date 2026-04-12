@@ -42,7 +42,8 @@ interface ScoredPlaybook {
 }
 
 interface BrandMappingInput {
-  brandId: number;
+  brandId?: number;
+  brandContext?: string;
   question: string;
   synthesisModel?: SynthesisModelId;
 }
@@ -104,6 +105,13 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, label = "op"): Pr
 }
 
 async function loadBrandContextNode(state: BrandMappingStateType): Promise<Partial<BrandMappingStateType>> {
+  if (state.input.brandContext) {
+    const embedModel = createEmbeddings();
+    const contextText = state.input.brandContext + "\n" + state.input.question;
+    const [embedding] = await withRetry(() => embedModel.embedDocuments([contextText]), 2, "embed_brand_context");
+    return { brandContext: state.input.brandContext, questionEmbedding: embedding };
+  }
+  if (!state.input.brandId) throw new Error("Either brandId or brandContext must be provided");
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
   if (!brand) throw new Error(`Brand ${state.input.brandId} not found`);
   const competitors = await db.select().from(competitorsTable).where(eq(competitorsTable.brandId, state.input.brandId));

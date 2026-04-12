@@ -8,6 +8,7 @@
 import type { SynthesisModelId } from "./synthesisModelId";
 
 export interface WhereToStartBody {
-  brandId: number;
+  brandId?: number;
+  brandContext?: string;
   synthesisModel?: SynthesisModelId;
 }
