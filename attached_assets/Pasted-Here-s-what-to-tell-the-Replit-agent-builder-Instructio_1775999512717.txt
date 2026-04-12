@@ -1,0 +1,47 @@
+Here's what to tell the Replit agent / builder:
+
+Instructions for Sieve: Add brandContext Inline Field
+What to change
+Three API endpoints need an optional brandContext string field in the request body:
+
+POST /brain/ask
+POST /brain/map-brand
+POST /brain/where-to-start
+How it works
+Currently loadBrandContextNode in each workflow does:
+
+brandId → DB lookup → build context string → embed
+
+Add this logic: if brandContext (string) is provided in the request body, use it directly as the brand text. Skip the DB lookup entirely. If brandContext is absent, fall back to brandId lookup as today.
+
+Files to modify
+artifacts/api-server/src/workflows/knowledgeQA.ts
+
+QAInput interface: add brandContext?: string
+loadBrandContextNode: if state.input.brandContext exists, use it directly as contextParts text, embed brandContext + question, return. Otherwise do the existing brandId DB lookup.
+artifacts/api-server/src/workflows/brandMapping.ts
+
+BrandMappingInput interface: add brandContext?: string
+loadBrandContextNode: same pattern — if brandContext exists, use it directly, embed it with the question. Otherwise DB lookup.
+artifacts/api-server/src/workflows/strategyStart.ts
+
+StrategyInput interface: add brandContext?: string
+loadBrandContextNode: same pattern.
+lib/api-zod/ and lib/api-spec/openapi.yaml
+
+Add brandContext as optional string field to AskBrainBody, MapBrandBody, GetBrandStrategyBody schemas.
+What NOT to change
+Everything from embedding onwards stays identical — scoring, re-ranking, synthesis, persistence, trace
+The brandId path continues to work exactly as today
+The React frontend doesn't need to change (it still uses brandId)
+No new tables, no schema changes, no new endpoints
+Validation
+If both brandContext and brandId are provided, brandContext takes precedence
+If neither is provided, the workflow runs without brand context (existing behavior for QA)
+brandContext should be a plain text string, any length — the workflow embeds it the same way it embeds the DB-built context string today
+How to test
+Call POST /brain/ask with {"question": "What SEO playbooks should this brand prioritize?", "brandContext": "Brand: TestCo\nICP: B2B SaaS targeting mid-market\nStage: Series A\nPositioning: AI-powered analytics platform"} — should return a brand-contextualized answer without needing a brand row in the DB
+Call the same endpoint with {"question": "same question", "brandId": 2} — should still work exactly as before
+Compare the two responses — both should have brandInference populated, both should show brand context influencing which brain objects were retrieved
+That's the complete instruction. One parameter, three files, same pipeline underneath. Once this is done, the strategy planner can call Sieve with any brand context from any source without needing a stored brand row.
+
