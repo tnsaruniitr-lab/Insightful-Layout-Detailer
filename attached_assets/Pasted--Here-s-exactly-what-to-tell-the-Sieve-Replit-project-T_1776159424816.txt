@@ -1,0 +1,95 @@
+
+
+
+Here's exactly what to tell the Sieve Replit project:
+
+The Problem
+When planner calls /api/brain/ask, the response includes source_refs with brain object IDs and titles — but NOT the original documents those principles/rules/playbooks were extracted from. This forces downstream consumers to cite "Sieve says" instead of the actual authority (Microsoft, Google, YC, Perplexity, etc.), which kills credibility when plans are shared externally.
+
+What to Change
+Enrich the source_refs array in every brain API response to include the original document attribution for each brain object.
+
+Currently each source_ref looks like:
+
+{
+  sourceType: "principle",
+  sourceId: 1054,
+  title: "Blocks Beat Pages as the Unit of AI Optimization",
+  domainTag: "aeo",
+  confidence: 0.97,
+  excerpt: "..."
+}
+
+It should also include:
+
+{
+  sourceType: "principle",
+  sourceId: 1054,
+  title: "Blocks Beat Pages as the Unit of AI Optimization",
+  domainTag: "aeo",
+  confidence: 0.97,
+  excerpt: "...",
+  original_sources: [
+    {
+      document_id: 234,
+      document_title: "Generative Engine Optimization (GEO) Guidance",
+      source_org: "Microsoft",
+      source_url: "https://learn.microsoft.com/...",
+      authority_tier: "tier_1",
+      trust_level: "high"
+    }
+  ]
+}
+
+Where the Data Lives
+The data already exists in Sieve's database — it just isn't being exposed. Each brain object table (principles, rules, playbooks, anti_patterns) has a source_refs_json column that stores references to the documents table. The documents table has: title, source_org, source_url, authority_tier, trust_level, domain_tag.
+
+The relationship: brain_object.source_refs_json → array of document_ids → documents table
+
+Implementation Scope
+Which endpoints: All three brain endpoints need this change:
+
+POST /api/brain/ask
+POST /api/brain/map-brand
+POST /api/brain/where-to-start
+Which files (based on the codebase I already explored):
+
+artifacts/api-server/src/workflows/knowledgeQA.ts — in the retrieval and source_ref hydration step
+artifacts/api-server/src/workflows/brandMapping.ts — same
+artifacts/api-server/src/workflows/strategyStart.ts — same
+Possibly artifacts/api-server/src/lib/scoring.ts if source_refs are assembled there
+lib/api-zod schema — add original_sources to the SourceRef type
+lib/api-spec/openapi.yaml — update spec
+The logic:
+For each brain object returned, parse its source_refs_json field, look up each document_id in the documents table, and attach the relevant fields (title, source_org, source_url, authority_tier, trust_level) as an original_sources array on the response.
+
+What NOT to Change
+Don't change the synthesis pipeline — LLM synthesis stays identical
+Don't change retrieval/scoring — vector search stays identical
+Don't break the existing source_refs structure — only ADD the original_sources field
+Don't change brand context handling — separate concern
+No new endpoints, no new tables, no schema migrations to brain object tables
+Edge Cases to Handle
+Brain object has no source_refs_json → return original_sources: []
+source_refs_json references a document that was deleted → skip silently, don't fail the whole response
+Document has missing fields (no source_url, etc.) → return partial data, don't require all fields
+Multiple documents per brain object → return all of them (principles often synthesize from multiple sources)
+Performance: Batch the document lookups — don't query documents table once per brain object. One query with WHERE id IN (...) for all document_ids in the response.
+Validation / How to Test
+Call POST /api/brain/ask with any question
+Every item in source_refs should have an original_sources array
+For high-confidence brain objects (like P:1054 "Blocks Beat Pages"), verify the original_sources includes the actual source — likely a Microsoft or Bing document
+Call with a brain object known to synthesize from multiple sources — confirm all sources are returned
+Check response size — should increase slightly but not explode
+Why This Matters
+Right now downstream tools (the strategy planner, blog writer, auditor) can only cite "Sieve principle XYZ". With this change, they can cite "Google Search Central guidance" or "Microsoft GEO documentation" — which is:
+
+More credible — buyers trust Microsoft, not "Sieve"
+Verifiable — readers can click through to the original source
+Honest — Sieve is a library, not the author
+Better AEO for downstream content — content that cites primary sources ranks and gets cited by AI engines at higher rates
+Summary for the Replit Agent
+"Enrich the source_refs array in all 3 brain API endpoint responses (/brain/ask, /brain/map-brand, /brain/where-to-start) to include an original_sources field on every brain object. Parse the existing source_refs_json column on each brain object, look up the referenced document IDs in the documents table, and attach document_title, source_org, source_url, authority_tier, and trust_level. Batch the document lookups for performance. Update the Zod schema and OpenAPI spec. No schema migrations, no new endpoints, no changes to retrieval or synthesis. The goal: let downstream consumers cite the actual authorities (Microsoft, Google, YC, etc.) instead of citing Sieve itself."
+
+That's the complete instruction. Want me to also draft a testing checklist or integration notes for how the planner will consume the new field?
+
