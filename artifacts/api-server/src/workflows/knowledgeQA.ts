@@ -126,14 +126,12 @@ async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateTyp
 async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAStateType>> {
   const embedModel = createEmbeddings();
   const phrases = state.queryPhrases.length > 0 ? state.queryPhrases : [state.input.question];
-  const brandPrefix = state.brandContext ? `${state.brandContext}\n` : "";
-  const textsToEmbed = phrases.map((q) => `${brandPrefix}${q}`);
   const embedResults = await Promise.all(
-    textsToEmbed.map((t) => withRetry(() => embedModel.embedDocuments([t]), 2, "embed_retrieve"))
+    phrases.map((t) => withRetry(() => embedModel.embedDocuments([t]), 2, "embed_retrieve"))
   );
   const vecs = embedResults.map(([e]) => e);
 
-  logger.info({ phraseCount: phrases.length, vecCount: vecs.length, hasBrandPrefix: !!brandPrefix, phrases }, "QA:retrieve — embeddings generated");
+  logger.info({ phraseCount: phrases.length, vecCount: vecs.length, phrases }, "QA:retrieve — embeddings generated (question-only, brand context in scoring+synthesis only)");
 
   const hasVec = vecs.length > 0 && vecs[0].length > 0;
   const domainClause = state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : "";
