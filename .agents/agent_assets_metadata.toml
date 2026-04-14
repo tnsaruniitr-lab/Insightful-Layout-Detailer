@@ -18,3 +18,9 @@ id = "dWGfshaMIhH5q4h9jUUIG"
 uri = "file://attached_assets/all_document_titles.csv"
 type = "table"
 title = "All 1,775 Document Titles"
+
+[[outputs]]
+id = "LZ9J5HmsGonsskbVz7SN3"
+uri = "file://attached_assets/all_chunk_hashes.csv"
+type = "table"
+title = "all_chunk_hashes.csv — 1,773 chunk MD5s"
