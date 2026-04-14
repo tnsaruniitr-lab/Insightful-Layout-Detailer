@@ -1132,6 +1132,30 @@ components:
           type: ["number", "null"]
         excerpt:
           type: ["string", "null"]
+        sourceOrg:
+          type: ["string", "null"]
+          description: Publisher name of the brain object (e.g. Google, Ahrefs, Microsoft)
+        originalSources:
+          type: array
+          description: Original documents this brain object was extracted from
+          items:
+            type: object
+            properties:
+              documentId:
+                type: integer
+              documentTitle:
+                type: string
+              sourceOrg:
+                type: ["string", "null"]
+              sourceUrl:
+                type: ["string", "null"]
+              authorityTier:
+                type: ["string", "null"]
+              trustLevel:
+                type: ["string", "null"]
+            required:
+              - documentId
+              - documentTitle
       required:
         - sourceType
         - sourceId

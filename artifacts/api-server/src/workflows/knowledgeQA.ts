@@ -15,6 +15,8 @@ import {
   parseEmbedding,
   buildChunkToDocMap,
   scoreAndSelect,
+  resolveOriginalSources,
+  type OriginalSource,
 } from "../lib/scoring";
 
 interface SourceRef {
@@ -24,6 +26,8 @@ interface SourceRef {
   domainTag: string | null;
   confidence: number | null;
   excerpt: string | null;
+  sourceOrg: string | null;
+  originalSources: OriginalSource[];
 }
 
 interface QAInput {
@@ -133,10 +137,10 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
   const [principleRows, playbookRows, ruleRows, apRows] = await Promise.all([
     pool.query<{
       id: number; title: string; statement: string; explanation: string | null;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
       status: string; cosine_dist: number; embedding_vector: string | null;
     }>(
-      `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, status,
+      `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, source_org, status,
               ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
        FROM principles
        WHERE status IN ('canonical', 'candidate') ${domainClause}
@@ -146,10 +150,10 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
     ),
     pool.query<{
       id: number; name: string; summary: string; use_when: string | null; avoid_when: string | null;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
       status: string; cosine_dist: number; embedding_vector: string | null;
     }>(
-      `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score, source_refs_json, status,
+      `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score, source_refs_json, source_org, status,
               ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
        FROM playbooks
        WHERE status IN ('canonical', 'candidate') ${domainClause}
@@ -159,10 +163,10 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
     ),
     pool.query<{
       id: number; name: string; if_condition: string; then_logic: string;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string;
+      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
       status: string; cosine_dist: number; embedding_vector: string | null;
     }>(
-      `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, status,
+      `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, source_org, status,
               ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
        FROM rules
        WHERE status IN ('canonical', 'candidate') ${domainClause}
@@ -172,10 +176,10 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
     ),
     pool.query<{
       id: number; title: string; description: string; signals_json: string;
-      domain_tag: string; risk_level: string; source_refs_json: string;
+      domain_tag: string; risk_level: string; source_refs_json: string; source_org: string | null;
       status: string; cosine_dist: number; embedding_vector: string | null;
     }>(
-      `SELECT id, title, description, signals_json, domain_tag, risk_level, source_refs_json, status,
+      `SELECT id, title, description, signals_json, domain_tag, risk_level, source_refs_json, source_org, status,
               ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
        FROM anti_patterns
        WHERE status IN ('canonical', 'candidate') ${domainClause}
@@ -194,7 +198,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       sourceRefsJson: r.source_refs_json,
       isCanonical: r.status === "canonical",
       embeddingVector: parseEmbedding(r.embedding_vector),
-      data: { title: r.title, statement: r.statement, explanation: r.explanation, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json },
+      data: { title: r.title, statement: r.statement, explanation: r.explanation, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json, sourceOrg: r.source_org },
     })),
     ...playbookRows.rows.map((r) => ({
       id: r.id, type: "playbook" as const,
@@ -204,7 +208,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       sourceRefsJson: r.source_refs_json,
       isCanonical: r.status === "canonical",
       embeddingVector: parseEmbedding(r.embedding_vector),
-      data: { name: r.name, summary: r.summary, useWhen: r.use_when, avoidWhen: r.avoid_when, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json },
+      data: { name: r.name, summary: r.summary, useWhen: r.use_when, avoidWhen: r.avoid_when, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json, sourceOrg: r.source_org },
     })),
     ...ruleRows.rows.map((r) => ({
       id: r.id, type: "rule" as const,
@@ -214,7 +218,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       sourceRefsJson: r.source_refs_json,
       isCanonical: r.status === "canonical",
       embeddingVector: parseEmbedding(r.embedding_vector),
-      data: { name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic, domainTag: r.domain_tag, confidenceScore: r.confidence_score },
+      data: { name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceOrg: r.source_org },
     })),
     ...apRows.rows.map((r) => ({
       id: r.id, type: "anti_pattern" as const,
@@ -224,7 +228,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       sourceRefsJson: r.source_refs_json,
       isCanonical: r.status === "canonical",
       embeddingVector: parseEmbedding(r.embedding_vector),
-      data: { title: r.title, description: r.description, signalsJson: r.signals_json, domainTag: r.domain_tag, riskLevel: r.risk_level },
+      data: { title: r.title, description: r.description, signalsJson: r.signals_json, domainTag: r.domain_tag, riskLevel: r.risk_level, sourceOrg: r.source_org },
     })),
   ];
 
@@ -402,20 +406,28 @@ ${antiPatternsContext || "None"}`;
 async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>> {
   const answer = state.answer!;
 
-  const sourceRefs: SourceRef[] = state.scoredObjects.map((o) => ({
-    sourceType: o.type === "anti_pattern" ? "anti_pattern" : o.type as SourceRef["sourceType"],
-    sourceId: o.id,
-    title: o.title,
-    domainTag: (o.data as Record<string, unknown>).domainTag as string ?? null,
-    confidence: o.confidence,
-    excerpt: (() => {
-      const d = o.data as Record<string, unknown>;
-      if (o.type === "principle") return String(d.statement ?? "").slice(0, 200);
-      if (o.type === "playbook") return String(d.summary ?? "").slice(0, 200);
-      if (o.type === "rule") return `IF ${d.ifCondition} THEN ${d.thenLogic}`.slice(0, 200);
-      return "";
-    })(),
-  }));
+  const originalSourcesMap = await resolveOriginalSources(state.scoredObjects);
+  const sourceRefs: SourceRef[] = state.scoredObjects.map((o) => {
+    const key = `${o.type}:${o.id}`;
+    const originalSources = originalSourcesMap.get(key) ?? [];
+    const sourceOrg = originalSources[0]?.sourceOrg ?? (o.data as Record<string, unknown>).sourceOrg as string | null ?? null;
+    return {
+      sourceType: o.type === "anti_pattern" ? "anti_pattern" : o.type as SourceRef["sourceType"],
+      sourceId: o.id,
+      title: o.title,
+      domainTag: (o.data as Record<string, unknown>).domainTag as string ?? null,
+      confidence: o.confidence,
+      excerpt: (() => {
+        const d = o.data as Record<string, unknown>;
+        if (o.type === "principle") return String(d.statement ?? "").slice(0, 200);
+        if (o.type === "playbook") return String(d.summary ?? "").slice(0, 200);
+        if (o.type === "rule") return `IF ${d.ifCondition} THEN ${d.thenLogic}`.slice(0, 200);
+        return "";
+      })(),
+      sourceOrg,
+      originalSources,
+    };
+  });
 
   const [run] = await db.insert(mappingRunsTable).values({
     brandId: state.input.brandId ?? null,

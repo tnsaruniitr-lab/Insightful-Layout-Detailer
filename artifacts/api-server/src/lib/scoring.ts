@@ -140,6 +140,68 @@ export async function buildAuthorityMap(docIds: number[]): Promise<Map<number, s
   return map;
 }
 
+export interface OriginalSource {
+  documentId: number;
+  documentTitle: string;
+  sourceOrg: string | null;
+  sourceUrl: string | null;
+  authorityTier: string | null;
+  trustLevel: string | null;
+}
+
+export async function resolveOriginalSources(
+  candidates: ScoredCandidate[]
+): Promise<Map<string, OriginalSource[]>> {
+  const allDocIds = new Set<number>();
+  const candidateDocIds = new Map<string, number[]>();
+
+  for (const c of candidates) {
+    const docIds = safeParseJson<number[]>(c.sourceRefsJson, []);
+    const key = `${c.type}:${c.id}`;
+    candidateDocIds.set(key, docIds);
+    docIds.forEach((id) => allDocIds.add(id));
+  }
+
+  if (allDocIds.size === 0) return new Map();
+
+  const { rows } = await pool.query<{
+    id: number;
+    title: string;
+    source_org: string | null;
+    source_url: string | null;
+    authority_tier: string | null;
+    trust_level: string | null;
+  }>(
+    `SELECT id, title, source_org, source_url, authority_tier, trust_level FROM documents WHERE id = ANY($1)`,
+    [[...allDocIds]]
+  );
+
+  const docMap = new Map(rows.map((r) => [r.id, r]));
+  const result = new Map<string, OriginalSource[]>();
+
+  for (const [key, docIds] of candidateDocIds) {
+    const seen = new Set<number>();
+    const sources: OriginalSource[] = [];
+    for (const docId of docIds) {
+      if (seen.has(docId)) continue;
+      seen.add(docId);
+      const doc = docMap.get(docId);
+      if (!doc) continue;
+      sources.push({
+        documentId: doc.id,
+        documentTitle: doc.title,
+        sourceOrg: doc.source_org,
+        sourceUrl: doc.source_url,
+        authorityTier: doc.authority_tier,
+        trustLevel: doc.trust_level,
+      });
+    }
+    result.set(key, sources);
+  }
+
+  return result;
+}
+
 function computeAuthorityCorroboration(docIds: number[], authorityMap: Map<number, string>): number {
   const uniqueIds = [...new Set(docIds)];
   const totalWeight = uniqueIds.reduce((sum, id) => {

@@ -1,0 +1,61 @@
+Good catch confirming that. Your decision to bundle both additions in one PR is right — doing them separately would be wasted work. Here's what I'll expect and how I'll use each field:
+
+What I'm Ready to Consume
+sourceOrg — Top-level publisher
+Use case: Quick attribution in prose.
+
+Instead of:
+
+"...per Sieve's 'Blocks Beat Pages' principle..."
+
+I'll write:
+
+"...per Microsoft's GEO guidance (Sieve: 'Blocks Beat Pages')..."
+
+One field read, immediate cite. No array traversal. This is the 80% case — most inline references just need the publisher name.
+
+originalSources — Full attribution array
+Use case: Bibliography + verifiable source links.
+
+When I build the Sources table at the end of each plan, each row will look like:
+
+Brain Object	Publisher	Document	Authority	URL
+Blocks Beat Pages	Microsoft	Generative Engine Optimization (GEO) Guidance	tier_1	[link]
+This is what makes the plan verifiable and credible for external readers. They can click through to the actual Microsoft doc and check the claim themselves.
+
+My Consumption Logic (Pseudocode-level, no code yet)
+For each source_ref in the response:
+  1. If originalSources is populated → use the FIRST entry as primary cite in prose
+     Format: "[Publisher]'s [Document Title] (via Sieve: [brain_object_title])"
+  2. If originalSources is empty but sourceOrg exists → use sourceOrg
+     Format: "[sourceOrg] (via Sieve: [brain_object_title])"
+  3. If both empty → fall back to "Sieve: [brain_object_title]" with a note that attribution is missing
+  4. For the bibliography table → render ALL entries in originalSources, not just the first
+
+What Changes in My Outputs
+Artifact	Change
+Inline citations	"Sieve's 'X' principle" → "Publisher's Document (via Sieve: 'X')"
+Sources table	Add columns: Publisher, Source Document, URL, Authority Tier
+Strategy priorities	Grounding line cites original authority first
+Anti-patterns	Same — original source > Sieve reference
+Exported MD files	The 6 existing plans retroactively rewritten once I can re-query Sieve
+One Clarification for the PR
+Naming consistency: You wrote sourceOrg and originalSources (camelCase), which is fine — just make sure they're consistent with the existing field casing in the response. The current shape uses:
+
+sourceType, sourceId, domainTag (camelCase)
+So sourceOrg and originalSources both fit the pattern. Good.
+
+Within originalSources entries, I'd expect fields like:
+
+documentId, documentTitle, sourceOrg, sourceUrl, authorityTier, trustLevel
+
+All camelCase, matching the top-level pattern. Just making sure the nested object doesn't accidentally ship as snake_case (document_title, source_url) — that would create a casing inconsistency inside the same response payload.
+
+Ready on My Side
+Once your PR ships:
+
+I'll run a test call against any brain endpoint
+Confirm the two new fields are populated
+Rewrite the 6 exported MD files with original-source citations
+Update the planner skill (.claude/skills/strategy-planner/SKILL.md) to use this pattern for all future plans automatically
+Go ahead and implement. The handoff is clear on both sides. When it's done, just let me know and I'll run the test + retroactive rewrite.
