@@ -1,0 +1,83 @@
+Second Query Result — Same Question, Same Outcome
+The Comparison
+Dimension	Run 1	Run 2
+Confidence	0.00	0.04
+Source refs returned	12	12 (identical brain objects)
+Rationale	"cannot be answered from available context"	"cannot be answered from the available context"
+Brain gap identified	"contains zero customer acquisition content"	"no go-to-market, customer acquisition, or growth strategy playbook"
+The brain hasn't changed. Same 12 brain objects retrieved, same explicit refusal to stretch the AEO content into growth advice.
+
+Why the Slight Confidence Bump (0.00 → 0.04)
+The synthesis LLM (Claude Sonnet 4.6) gave a marginally different synthesis this time. In Run 2, it surfaced one small brand-grounded inference:
+
+"The playbooks [PB:388], [PB:1389], and [PB:1418] describe manual-first tracking processes that AnswerMonk's automated platform could replace — meaning agencies and marketing teams already executing these manual processes are a documented audience with a demonstrated need."
+
+That's a subtle but useful observation: the brain validates AnswerMonk's ICP even though it can't recommend tactics to reach them. The 0.04 reflects that one small partial claim being grounded.
+
+But the core refusal stands: 0.04 confidence is still "the brain cannot answer this." Both runs correctly refused to hallucinate growth tactics from AEO implementation playbooks.
+
+What This Confirms
+1. Sieve is deterministic on retrieval ✅
+Same 12 brain objects returned both times, in roughly the same order. This is what you want — vector search + scoring should be reproducible for the same query. The LLM synthesis varies slightly (0.00 vs 0.04, different wording), but the underlying retrieval is stable.
+
+2. Sieve is honestly calibrated ✅
+Two independent runs, both explicitly say:
+
+"Cannot be answered from available context"
+"Zero customer acquisition content"
+"No go-to-market playbooks"
+"No claims about acquisition tactic ranking can be made"
+A poorly calibrated RAG would have confidently BS'd the answer by stretching AEO playbooks into "growth strategy." Sieve correctly refuses.
+
+3. The enriched source pipeline works consistently ✅
+Both runs returned full sourceOrg + originalSources attribution on all 12 refs. No regressions. No missing fields.
+
+4. The brain genuinely has a content gap for B2B GTM ✅
+This isn't a fluke or a bad retrieval — the brain literally does not contain:
+
+Cold outreach playbooks
+Founder-led content strategy
+Agency partnership frameworks
+Lead magnet tactics
+Product Hunt launch guides
+Community seeding strategies
+B2B SaaS budget allocation
+Growth tactic ROI ranking
+The One Small New Signal (Brand Inference in Run 2)
+Run 2 did produce a useful brand-grounded observation that Run 1 missed:
+
+"The playbooks [PB:388], [PB:1389], and [PB:1418] describe manual-first tracking processes that AnswerMonk's automated platform could replace — meaning agencies and marketing teams already executing these manual processes are a documented audience with a demonstrated need."
+
+Translation: The brain tells you WHO to target (agencies and marketing teams currently doing manual AEO tracking), but not HOW to reach them.
+
+This is actually tactically useful — it validates AnswerMonk's ICP from the brain's perspective. You can cite HubSpot's manual tracking guide and say "companies currently following this process are your exact buyers."
+
+The Verdict After Two Runs
+The pipeline is doing exactly what it should:
+
+Retrieval is deterministic and fast
+Source attribution is complete
+Calibration is honest — 0.04 is correctly low
+The LLM synthesis refuses to hallucinate
+The limitation isn't the tech. It's the brain's content coverage.
+
+If you want Sieve to answer growth questions with the same confidence it answers AEO questions (0.72+ on structured content queries), the brain needs B2B GTM content ingested.
+
+What I'd Do Now
+Option A: Accept the gap, use my earlier synthesis
+My original "5 actions" answer was 30% brain-grounded (YC PMF principles, HubSpot AEO structure) + 70% advisor synthesis. That's the best you can get from Sieve today for customer acquisition questions. I should have labeled it more honestly.
+
+Option B: Fix the gap, ingest growth content
+Add B2B GTM sources to the brain. Priority ingestion list (highest signal per document):
+
+Source	Why
+Y Combinator Startup School — "Sales for Startups" (Tyler Bosmeny talk)	Tier 1, covers cold outreach mechanics
+Lenny Rachitsky's newsletter archive (growth tactics posts)	Tier 2, highest-signal B2B SaaS growth content
+First Round Review (growth + GTM articles)	Tier 2, editor-quality B2B SaaS playbooks
+Justin Welsh's Creator OS (founder-led social)	Tier 2-3, LinkedIn founder content playbook
+OpenView Partners PLG blog	Tier 2, product-led growth B2B SaaS
+Refine Labs / Chris Walker content	Tier 2, B2B demand gen approach
+Josh Braun's cold outreach content	Tier 2-3, cold email/call tactics
+Aaron Ross "Predictable Revenue" content	Tier 2, outbound SaaS sales
+Ingesting 30-50 documents from these would transform Sieve's answer to this exact question.
+
