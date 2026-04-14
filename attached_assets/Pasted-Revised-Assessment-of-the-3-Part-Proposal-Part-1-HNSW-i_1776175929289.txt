@@ -1,0 +1,60 @@
+Revised Assessment of the 3-Part Proposal
+Part 1 — HNSW indexes: Possibly already done, but worth verifying.
+
+The migration files 0001_pgvector_hnsw.sql and 0002_brain_embeddings.sql use pgvector defaults which are m=16, ef_construction=64 already. IF these migrations were run on Replit's Postgres, Part 1 is done. IF they weren't, Part 1 is needed.
+
+To verify, someone with access to Replit's Postgres should run:
+
+SELECT indexname, indexdef FROM pg_indexes
+WHERE schemaname = 'public' AND tablename IN ('principles', 'rules', 'playbooks', 'anti_patterns')
+AND indexdef LIKE '%hnsw%';
+
+If 4 rows come back, Part 1 is done. If 0 rows, run the migrations.
+
+Part 2 — ef_search=64: This is a real gap.
+
+I grepped the Sieve codebase earlier and found zero references to ef_search or hnsw.ef_search. Sieve uses the pgvector default of ef_search = 40. Bumping to 64 would improve recall from ~94% to ~98% at minimal latency cost (about 10-20ms extra per query).
+
+Implementation: either
+
+Set globally at DB level: ALTER DATABASE <name> SET hnsw.ef_search = 64
+Or set per-query: SET LOCAL hnsw.ef_search = 64 at the start of each search transaction
+The per-query approach is better because it scopes the setting to retrieval queries only, not every query hitting the DB.
+
+Part 3 — Multi-query expansion + RRF: This is a meaningful upgrade.
+
+Sieve already has query expansion — parseQuestionNode in knowledgeQA.ts generates 2 reformulations via gpt-4o-mini and averages the 3 vectors together. Averaging is the quick-and-dirty approach; it works but blurs signal.
+
+RRF (Reciprocal Rank Fusion) is strictly better:
+
+Embed each query phrase separately → 3 different vectors
+Run 3 separate retrievals → 3 different candidate pools (each with its own ranking)
+Merge with RRF: score(doc) = Σ 1 / (k + rank_i) where k is typically 60
+Top-N from merged scores become the final candidates
+This catches objects that are strongly relevant to ONE sub-query but weakly relevant to the others — those get surfaced by RRF but drowned out by averaging.
+
+Corrected Recommendation
+If the Sieve team can confirm HNSW indexes exist on Replit's Postgres (one SQL query), then:
+
+Skip Part 1 — already done
+Do Part 2 now — it's a 5-line code change in the retrieval path (BEGIN; SET LOCAL hnsw.ef_search = 64; <query>; COMMIT; or equivalent). Zero downside. Measurable recall improvement.
+Consider Part 3 — it's a bigger code change (needs to issue 3 separate pgvector queries per retrieval node, then merge). Worth it but not urgent. Do it after you've measured the Part 2 impact.
+If HNSW indexes DON'T exist on Replit's Postgres:
+
+Do Part 1 first — run the migration files. They're already written with the right parameters.
+Then Part 2 and 3 in order.
+The Cleanest Verification
+Ask the Sieve team to run this on Replit's Postgres (the live one, not Supabase):
+
+-- Does the HNSW index exist?
+SELECT indexname FROM pg_indexes
+WHERE tablename = 'principles' AND indexdef LIKE '%hnsw%';
+
+-- Are embeddings populated?
+SELECT count(*) FILTER (WHERE embedding_vector IS NOT NULL) as with_embedding,
+       count(*) as total
+FROM principles;
+
+Those two queries tell you exactly where you stand. I can't run them from here because the MCP only connects to Supabase. But once you have the answers, the path forward is clear.
+
+I owe you a correction on the earlier assessment — I assumed Supabase was the primary DB and that led me to an incorrect conclusion. The code makes it clear now: Supabase is a replica for the UI/tooling, the live brain lives on Replit's Postgres, and that's where the vector search actually runs.
