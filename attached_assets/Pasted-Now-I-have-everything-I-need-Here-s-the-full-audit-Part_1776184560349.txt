@@ -1,0 +1,362 @@
+Now I have everything I need. Here's the full audit.
+
+Part 1: The Fix in knowledgeQA.ts — Verified Correct
+Commit 6d228c2 shows exactly what changed. Let me walk through what the bug actually was, because the "LangGraph drops arrays" framing is slightly off from what the code reveals:
+
+The Actual Root Cause
+The old workflow ran in this order: parseQuestionNode → loadBrandContextNode → retrieveAndScoreNode
+
+Old parseQuestionNode: generated 3 phrase embeddings, stored them in state.questionEmbeddings as number[][] (a 3-element array of 1536-float vectors).
+
+Old loadBrandContextNode (the bug):
+
+if (state.input.brandContext) {
+  const compositeText = state.input.brandContext + "\n" + state.input.question;
+  const [embedding] = await ... embedDocuments([compositeText]);
+  return { brandContext: ..., questionEmbeddings: [embedding] };  // ← 1-element array
+}
+
+loadBrandContextNode was OVERWRITING questionEmbeddings with a single-element array. It took the 3 embeddings parseQuestionNode had just generated and replaced them with one composite embedding of brandContext + originalQuestion. The 3 reformulations were silently thrown away.
+
+This wasn't LangGraph truncating large arrays. It was a code-level overwrite — loadBrandContextNode explicitly set questionEmbeddings: [embedding], a length-1 array. The user's intuition about "vecCount: 1 at retrieve" was correct, but the mechanism was cleaner than "state truncation."
+
+The composite embedding was AnswerMonk brand context + customer acquisition question. Since the brand context dominated (it's longer than the question), the embedding drifted toward AEO content. By the time retrieveAndScoreNode ran, it had exactly 1 vector that was mostly about AEO, and vector search returned AEO content.
+
+The Fix — Clean and Correct
+The new code:
+
+State annotation changed: questionEmbeddings: Annotation<number[][]> → queryPhrases: Annotation<string[]>. Strings, not float arrays, travel in state. Lightweight and impossible to silently overwrite with a shorter array.
+parseQuestionNode: no longer creates embeddings. Just expands the query and stores queryPhrases (3 strings) in state.
+loadBrandContextNode: no longer creates embeddings. Just resolves brand context to a string and stores it in state. Returns { brandContext } only.
+retrieveAndScoreNode: generates embeddings FRESH at the top of the node:
+const phrases = state.queryPhrases.length > 0 ? state.queryPhrases : [state.input.question];
+const brandPrefix = state.brandContext ? `${state.brandContext}\n` : "";
+const textsToEmbed = phrases.map((q) => `${brandPrefix}${q}`);
+const embedResults = await Promise.all(
+  textsToEmbed.map((t) => withRetry(() => embedModel.embedDocuments([t]), 2, "embed_retrieve"))
+);
+const vecs = embedResults.map(([e]) => e);
+
+3 phrases × (brand prefix prepended) = 3 branded texts
+Each one gets its own fresh embedding
+No state hand-off of float arrays anywhere — the vectors exist only in local scope
+Impossible to drop to 1 because there's no node transition between embed and search
+The new log line QA:retrieve — embeddings generated with phraseCount + vecCount + hasBrandPrefix + phrases proves whether 3 embeddings actually got generated.
+
+What This Means for the Retrieval Quality
+The fix gives you the architecture that was supposed to exist from the start:
+
+RRF actually runs on 3 diverse vectors now, not 1 drifted composite
+Brand context is prepended to EACH phrase — so each of the 3 retrievals is brand-aware in the same way, but the 3 phrases remain semantically distinct (original question + 2 reformulations)
+RRF merge across 3 lists per table actually happens, surfacing B2B content that was drowned by the drifted single-vector search
+The verification you saw in the logs (topPrinciple: "AEO Is a Core B2B GTM Motion in 2025", topPlaybook: "B2B Growth Sales Strategy Implementation", topSimilarity: 0.6637, finalConfidence: 0.90) confirms all 3 things working together.
+
+Part 2: The Same Bug Still Exists in brandMapping.ts and strategyStart.ts
+This is the critical finding from the audit. The fix was applied to knowledgeQA.ts only. The other two workflows are still passing float arrays through LangGraph state.
+
+brandMapping.ts — Same Pattern, Not Fixed
+// Line 77 — state annotation
+questionEmbeddings: Annotation<number[][]>({ value: (_p, n) => n, default: () => [] }),
+
+// Line 163 — loadBrandContextNode returns embeddings in state
+return { brandContext: brandContextText, questionEmbeddings: vecs };
+
+// Line 167 — retrieveAndScoreNode reads embeddings from state
+const vecs = state.questionEmbeddings;
+
+The code doesn't have the same overwrite bug as old knowledgeQA (it has only one node generating embeddings, not two), so the 3 vectors should make it through. BUT — if there's a separate LangGraph state issue with large float arrays that was the actual root cause (and not the loadBrandContextNode overwrite), this workflow has the same vulnerability.
+
+strategyStart.ts — Same Pattern, Not Fixed
+// Line 70 — state annotation  
+brandEmbeddings: Annotation<number[][]>({ value: (_p, n) => n, default: () => [] }),
+
+// Line 154 — loadBrandContextNode returns embeddings in state
+return { brandContext, brandEmbeddings: vecs };
+
+// Line 158 — retrieveAndScoreNode reads embeddings from state
+const vecs = state.brandEmbeddings;
+
+Same situation. Strategy generates 3 "perspective" embeddings (brandContext, icpPositioning, productOutcomes) in loadBrandContextNode, stores them in state, reads them in retrieveAndScoreNode. If LangGraph state has issues with number[][] at this size, strategy has the same problem.
+
+What You Need to Test
+Run the same customer acquisition question against /brain/map-brand and /brain/where-to-start. If they return low confidence (0.04-ish), the bug was genuinely LangGraph-level state issues and they need the same fix. If they return high confidence, the bug was specific to the knowledgeQA overwrite pattern.
+
+My reading of the code says the bug was the overwrite in old knowledgeQA's loadBrandContextNode, not a state-level issue. In that case brandMapping and strategyStart are probably fine because they don't have the same overwrite pattern. But I cannot prove this without running the query — and the cost of being wrong is that brand mapping and strategy plans silently produce bad results.
+
+The safer fix would be to apply the same pattern (strings in state, embeddings generated in retrieve node) to brandMapping and strategyStart. It's a defensive move that eliminates the vulnerability entirely and makes all 3 workflows consistent. The downside is latency — embedding moves from loadBrandContext to retrieve, adding ~200-400ms to the retrieve node's total time. But latency is not currently a problem.
+
+Part 3: Deep Audit of the Vector Search Flow (Post-Fix)
+Here's exactly what happens when the planner calls POST /api/brain/ask with a question + optional brandContext:
+
+Step 1: Request Validation (routes/brain.ts)
+POST /api/brain/ask
+{ question: "...", brandContext?: "...", brandId?: number, useBrandContext?: boolean, 
+  synthesisModel?: "claude-sonnet-4-6", domainFilter?: "seo"|"aeo"|... }
+
+Body validated with AskBrainBody.safeParse(req.body). If invalid → 400. Otherwise → calls runKnowledgeQAGraph(parsed.data).
+
+Step 2: Node 1 — parseQuestionNode
+Calls gpt-4o-mini with prompt: "Return a JSON array of exactly 2 search-optimized phrases that reformulate the user's question for semantic retrieval..."
+Parses JSON response
+Creates queryPhrases = [originalQuestion, reformulation1, reformulation2] (3 strings)
+If the LLM call fails: falls back to queryPhrases = [originalQuestion] (1 string)
+Logs: phraseCount
+Returns: { queryPhrases } — strings only, no embeddings
+Step 3: Node 2 — loadBrandContextNode
+Three paths:
+
+Path A: inline brandContext passed in request
+
+if (state.input.brandContext) {
+  return { brandContext: state.input.brandContext };
+}
+
+Just stores the text. No DB lookup, no embedding.
+
+Path B: brandId passed + useBrandContext true
+
+const [brand] = await db.select().from(brandsTable)...;
+const contextParts = [brand.name, brand.icpDescription, ...].filter(Boolean);
+return { brandContext: contextParts.join("\n") };
+
+Loads from brands table, assembles context string. Still no embedding.
+
+Path C: no brand info provided
+
+return { brandContext: null };
+
+Step 4: Node 3 — retrieveAndScoreNode (the heart of the fix)
+const embedModel = createEmbeddings();
+const phrases = state.queryPhrases.length > 0 ? state.queryPhrases : [state.input.question];
+const brandPrefix = state.brandContext ? `${state.brandContext}\n` : "";
+const textsToEmbed = phrases.map((q) => `${brandPrefix}${q}`);
+
+If brandContext exists: each of the 3 phrases gets "${brandContext}\n${phrase}" prepended → 3 branded texts.
+If no brandContext: just the 3 raw phrases.
+
+const embedResults = await Promise.all(
+  textsToEmbed.map((t) => withRetry(() => embedModel.embedDocuments([t]), 2, "embed_retrieve"))
+);
+const vecs = embedResults.map(([e]) => e);
+
+3 parallel calls to OpenAI text-embedding-3-small. Each returns a number[1536]. Result: vecs is number[3][1536].
+
+Logs: phraseCount: 3, vecCount: 3, hasBrandPrefix: true/false.
+
+Step 5: Vector Search (still inside retrieveAndScoreNode)
+const hasVec = vecs.length > 0 && vecs[0].length > 0;
+const domainClause = state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : "";
+const RRF_K = 60;
+
+If hasVec is true:
+
+const allQueries = vecs.flatMap((vec) => {
+  const vecStr = `[${vec.join(",")}]`;
+  return [
+    pool.query<PRow>(`... ORDER BY embedding_vector <=> $1::vector LIMIT 50`, [vecStr]),
+    pool.query<PBRow>(`... ORDER BY embedding_vector <=> $1::vector LIMIT 50`, [vecStr]),
+    pool.query<RRow>(`... ORDER BY embedding_vector <=> $1::vector LIMIT 50`, [vecStr]),
+    pool.query<APRow>(`... ORDER BY embedding_vector <=> $1::vector LIMIT 50`, [vecStr]),
+  ];
+});
+
+3 vectors × 4 tables = 12 parallel pgvector queries, each LIMIT 50. Each query sorts by cosine distance using HNSW index (if present on Replit's Postgres).
+
+Results processed:
+
+const results = await Promise.all(allQueries);
+// results[0..3] = principles/playbooks/rules/ap for vec 0
+// results[4..7] = same for vec 1
+// results[8..11] = same for vec 2
+
+Then grouped into per-table ranked lists:
+
+const principlesLists: PRow[][] = [];  // 3 lists
+const playbooksLists: PBRow[][] = [];
+const rulesLists: RRow[][] = [];
+const apLists: APRow[][] = [];
+
+for (let i = 0; i < vecs.length; i++) {
+  principlesLists.push((results[i * 4 + 0] as ...).rows);
+  playbooksLists.push((results[i * 4 + 1] as ...).rows);
+  rulesLists.push((results[i * 4 + 2] as ...).rows);
+  apLists.push((results[i * 4 + 3] as ...).rows);
+}
+
+Step 6: RRF Merge Per Table
+principleRows = applyRRF(principlesLists).slice(0, 40);
+playbookRows = applyRRF(playbooksLists).slice(0, 40);
+ruleRows = applyRRF(rulesLists).slice(0, 40);
+apRows = applyRRF(apLists).slice(0, 40);
+
+applyRRF takes N ranked lists and merges them:
+
+for (const list of rankedLists) {
+  list.forEach((item, rank) => {
+    const addedScore = 1 / (RRF_K + rank + 1);  // k=60
+    // Accumulate RRF score per unique object ID
+  });
+}
+return Array.from(scoreMap.values())
+  .sort((a, b) => b.rrfScore - a.rrfScore)
+  .map(({ item, bestDist }) => ({ ...item, cosine_dist: bestDist }));
+
+Objects appearing in multiple lists get summed RRF scores → bubble to top. Objects only in one list get lower combined scores. bestDist preserves the best cosine distance across all vectors for each object (used later in the scoring pipeline).
+
+Each table returns top 40 after RRF merge. Total: 160 candidates going into the next stage.
+
+Logs: vecCount, principleCount, playbookCount, ruleCount, apCount, topPrincipleDist, topPlaybookDist, topRuleDist, topPlaybook name, topPrinciple title.
+
+Step 7: Candidates → Scoring Pipeline
+All 160 candidates are mapped into ScoringCandidate[] with:
+
+similarity = 1 - cosineDist (clipped to [0,1])
+confidence from DB column (or 0.4 for anti-patterns)
+embeddingVector parsed for dedup use
+data with full object fields
+Passed to scoreAndSelect with:
+
+{
+  candidates,
+  targetCount: 12,
+  queryLabel: "qa:..."
+  domainHint: state.input.domainFilter,
+  reranker: { enabled: true, question, brandContext, model: "gpt-4o-mini" }
+}
+
+Step 8: Scoring (lib/scoring.ts)
+Per-candidate scoring:
+
+finalScore = 
+  0.55 * similarity +
+  0.20 * confidence +
+  0.10 * sourceWeight +        // log(1 + distinctDocs) / log(6)
+  0.10 * authorityCorroboration + // normalized log of authority tier sum
+  0.05 * canonicalBoost +       // 1 if canonical, else 0
+  0.05 * domainAffinityBoost    // 1 if domain matches hint, else 0
+
+Sort by finalScore desc, take top 40 for trace.
+
+Step 9: Embedding Dedup
+For the top 40, check pairwise cosine similarity. If > 0.92, remove the lower-scored duplicate. If >50% of candidates get removed, fall back to 0.85 threshold.
+
+Step 10: LLM Re-ranker (if applicable)
+Only fires if:
+
+Reranker enabled
+Candidates >= 8
+Similarity stddev > 0.08 (meaningful variance in the pool)
+If fired: calls gpt-4o-mini with the 40 candidates' titles + excerpts + question + brand context, asks for a JSON array sorted by relevance. Re-orders the candidates.
+
+Step 11: Diversity Caps
+If one type dominates (>60% of top-N), applies caps: rule(5), principle(4), playbook(3), anti_pattern(2). Otherwise no caps.
+
+Result: top 12 objects with mixed types.
+
+Step 12: Node 4 — synthesizeAnswerNode
+const LOW_CONFIDENCE_THRESHOLD = 0.25;
+const topSimilarity = max(scoredObjects.similarity);
+const avgSimilarity = avg(scoredObjects.similarity);
+
+logger.info({... willTriggerLowConf: topSimilarity < 0.25 || avgSimilarity < 0.15});
+
+if (topSimilarity < 0.25 || avgSimilarity < 0.15) {
+  return { answer: { confidence: 0, ... "insufficient knowledge" ... } };
+}
+
+If threshold passes: builds the synthesis prompt with all 12 objects rendered as [P:id] title: statement, etc., calls invokeSynthesisModel (gpt-4o / Claude / Gemini) with strict citation rules, parses JSON response.
+
+Step 13: Node 5 — persistRunNode
+Inserts a row in mapping_runs with the full answer
+Inserts source refs in mapping_run_sources
+Inserts full scoring trace in query_traces
+Returns the QAOutput to the API caller
+Part 4: Summary for the Planner Project
+What Works Now in knowledgeQA.ts
+3 diverse embeddings, each with brand context prepended
+12 parallel pgvector queries
+RRF merges the 3 query perspectives per table
+Full logging at every step for debugging
+Brand-aware retrieval that doesn't drift away from the question's domain
+What's Still Broken or Risky
+brandMapping.ts and strategyStart.ts have not been fixed — they still pass number[][] through LangGraph state. If the same bug class exists there, the planner's /brain/map-brand and /brain/where-to-start calls may silently produce bad retrievals.
+The same bug only existed in knowledgeQA because of the overwrite pattern in the old loadBrandContextNode. brandMapping and strategyStart generate embeddings in ONE node and don't have that specific overwrite. So the pure theory says they should be fine.
+But if the root cause was actually a LangGraph state-level issue with large arrays (the user's original hypothesis), then brandMapping and strategyStart are still broken.
+You can only find out by testing. Run the same customer acquisition question through all three endpoints:
+
+/api/brain/ask — FIXED, should return high confidence
+/api/brain/map-brand — NOT fixed, untested after the fix
+/api/brain/where-to-start — NOT fixed, untested after the fix
+If all three return high confidence, the bug was knowledgeQA-specific and the other two are fine by luck. If brandMapping or strategyStart return low confidence, they need the same fix.
+
+Implication for Your GTM Planner
+The planner skill calls all three endpoints depending on the query type:
+
+Diagnostic questions with brand context → /brain/ask (fixed)
+Playbook ranking → /brain/map-brand (not fixed)
+Strategy generation → /brain/where-to-start (not fixed)
+Your diagnostic queries may work fine now, but plan generation (which uses map-brand and where-to-start) may still produce drifted retrievals. For full end-to-end confidence in the planner's output, brandMapping and strategyStart should get the same treatment.
+
+Querying Quality Now
+For /brain/ask queries: dramatically better. The bug was masking the improvements from HNSW + RRF. Now that each query actually runs with 3 branded vectors, RRF does its job, and retrieval pulls the right content. The AnswerMonk test went from 0.04 to 0.90 confidence on the same data. That's a 22x confidence improvement with zero new content.
+
+For /brain/map-brand and /brain/where-to-start: unknown. Unless and until tested with the same regression query, I can't tell you whether these benefit from the fix or still have the old drift problem.
+
+
+Created a file, finished plan, used a tool
+Created a file, finished plan, used a tool
+
+Neither. I was just writing a test plan to the plan file. Here's what I'd actually do next, stated clearly:
+
+What I Can Do From Here
+I cannot test /brain/map-brand or /brain/where-to-start myself because:
+
+I don't have the Sieve Replit URL
+I can't call external HTTPS endpoints without it
+Even if I had the URL, running the test requires the Sieve app to be deployed and reachable
+What Someone Needs to Do (You or the Sieve Team)
+1. Run two API calls against the Sieve Replit deployment:
+
+Test A — brandMapping:
+
+POST <SIEVE_URL>/api/brain/map-brand
+Body: {
+  "question": "What are the 5 most important customer acquisition tactics for AnswerMonk to focus on right now?",
+  "brandContext": "<same AnswerMonk brand context used in the earlier test that showed the bug>",
+  "synthesisModel": "claude-sonnet-4-6"
+}
+
+Test B — strategyStart:
+
+POST <SIEVE_URL>/api/brain/where-to-start
+Body: {
+  "brandContext": "<same AnswerMonk brand context>",
+  "synthesisModel": "claude-sonnet-4-6"
+}
+
+2. Read the response confidence field from each.
+
+If both return confidence > 0.6 and the source_refs top 3 include B2B acquisition playbooks (PB:424, 478, 474, 472, 419, etc.) → bug was knowledgeQA-specific, other two are fine, no code change needed.
+If either returns confidence < 0.3 with AEO-dominated source_refs → same drift bug, the fix needs to be applied to that file.
+3. Share the results with me. I'll tell you definitively whether brandMapping and strategyStart need the same queryPhrases/in-node-embedding pattern applied, or whether they're safe by construction.
+
+Why I'm Recommending Testing, Not Coding
+Two possible theories on the root cause, and the code evidence alone can't distinguish them:
+
+Theory A: Bug was specifically the loadBrandContextNode in old knowledgeQA overwriting the 3 embeddings with 1. That pattern doesn't exist in brandMapping or strategyStart (they generate embeddings in one node, not two). If Theory A is right → the other two are fine.
+
+Theory B: Bug was a LangGraph state issue with passing number[][] between nodes. If Theory B is right → brandMapping and strategyStart have the same vulnerability because they also pass number[][] between loadBrandContextNode and retrieveAndScoreNode.
+
+The code pattern in brandMapping/strategyStart is vulnerable under Theory B but safe under Theory A. A single test query gives you a definitive answer — no code change needed if Theory A, same fix needed if Theory B.
+
+My Bet
+Reading the code, Theory A seems more likely. The old knowledgeQA had an explicit questionEmbeddings: [embedding] in loadBrandContextNode that replaced the parseQuestionNode output — a specific, locatable bug. I don't see evidence LangGraph is doing anything weird with float arrays (the annotation reducer is (_p, n) => n which is a clean replace, and serialization should handle 1536×3 floats fine at ~20KB).
+
+But I'd put the probability at maybe 70/30, not 95/5. Worth the 2 API calls to confirm before you ship plans grounded in potentially-drifted retrievals.
+
+What I'll Do With the Test Results
+Once you run the two API calls and share the confidence + top 3 source_refs from each:
+
+Both high confidence + B2B content: I'll tell you the fix was isolated, the planner is safe, move on.
+Either low confidence: I'll write the exact one-line code spec (same pattern as the knowledgeQA fix) for the affected file, you relay it to the Sieve Replit team, they apply it, you re-test.
+The action for you right now is: run the 2 API calls and share the results. I'll take it from there.
