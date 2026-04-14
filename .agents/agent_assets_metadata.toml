@@ -17,7 +17,7 @@ title = "Brain Audit — Full JSON (79KB)"
 id = "dWGfshaMIhH5q4h9jUUIG"
 uri = "file://attached_assets/all_document_titles.csv"
 type = "table"
-title = "All 1,775 Document Titles"
+title = "all_document_titles.csv — 1,775 docs with slugs"
 
 [[outputs]]
 id = "LZ9J5HmsGonsskbVz7SN3"
