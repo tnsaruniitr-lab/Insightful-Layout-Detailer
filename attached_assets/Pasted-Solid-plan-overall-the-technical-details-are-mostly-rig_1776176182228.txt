@@ -1,0 +1,136 @@
+Solid plan overall — the technical details are mostly right, but there are three corrections and one missing piece worth addressing before execution.
+
+What's Right
+Part 1 — CREATE INDEX CONCURRENTLY is the correct move. Non-blocking, safe under production load, correct operator (vector_cosine_ops matches the <=> cosine distance operator). The m=16, ef_construction=64 defaults are appropriate for your scale.
+
+Part 2 — SET LOCAL inside a transaction is the correct approach. SET LOCAL only persists for the current transaction, which is exactly what you want — scope the setting to retrieval queries only, don't affect anything else. Transaction wrapping is the textbook way to do this.
+
+Part 3 — RRF with k=60 is the canonical formulation. That constant is from the original Cormack/Clarke paper and is the standard choice. Running separate retrievals per query vector and merging by rank is strictly better than averaging.
+
+Sequencing — correct. Parts 1 and 2 together is right. Part 3 as a separate session with measurement is right.
+
+What Needs Correction
+Correction 1: "Part 2 has no effect without Part 1" is wrong
+ef_search is a runtime parameter that controls the HNSW index's search behavior. If the HNSW index exists, changing ef_search changes recall immediately. If the HNSW index doesn't exist, Postgres falls back to a sequential scan and ef_search has zero effect.
+
+So the dependency is actually: Part 2 only has effect IF Part 1 (or pre-existing HNSW indexes) is in place. If HNSW indexes already exist on Replit's Postgres (likely, given the migration files), then Part 2 alone provides the recall improvement with zero index build time.
+
+This matters because: if HNSW indexes already exist, you should skip Part 1 entirely. Running CREATE INDEX CONCURRENTLY IF NOT EXISTS on an already-indexed column is a no-op, but it's worth verifying first rather than assuming. A single \d principles or the pg_indexes query I gave earlier tells you in 5 seconds whether Part 1 is redundant.
+
+Correction 2: document_chunks may not exist
+My earlier query on Supabase showed relation "document_chunks" does not exist. On Replit's Postgres it might exist (that's where the primary DB lives), but I can't verify from here. Before running CREATE INDEX CONCURRENTLY ON document_chunks ..., someone should confirm the table actually exists there. If it doesn't, the index statement fails.
+
+Worth checking:
+
+SELECT table_name FROM information_schema.tables 
+WHERE table_schema = 'public' AND table_name = 'document_chunks';
+
+If it doesn't exist on Replit's Postgres either, that's a separate issue (the ingestion pipeline references it, so something's off). But for Part 1, you'd just skip that statement and run indexes on the 4 brain tables only.
+
+Correction 3: Part 2 transaction wrapping needs to cover the RIGHT query, not just any query
+Your description says "acquire a client from the pool, open a transaction, issue SET LOCAL, run the vector query, then release." That's correct in principle. But the retrieveAndScoreNode in knowledgeQA.ts runs 4 parallel queries (principles, playbooks, rules, anti_patterns) via Promise.all. Each one is a separate pool.query call.
+
+You have two choices:
+
+Option A: Serialize into one transaction
+
+const client = await pool.connect();
+try {
+  await client.query('BEGIN');
+  await client.query("SET LOCAL hnsw.ef_search = 64");
+  const [p, pb, r, ap] = await Promise.all([
+    client.query(/* principles query */),
+    client.query(/* playbooks query */),
+    client.query(/* rules query */),
+    client.query(/* anti_patterns query */),
+  ]);
+  await client.query('COMMIT');
+  // use results
+} finally {
+  client.release();
+}
+
+Problem: A single client can't actually run 4 queries in parallel. client.query on a shared client serializes internally. You lose the parallelism benefit.
+
+Option B: 4 separate transactions from 4 clients
+
+async function withEfSearch<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL hnsw.ef_search = 64");
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } finally {
+    client.release();
+  }
+}
+
+const [p, pb, r, ap] = await Promise.all([
+  withEfSearch((c) => c.query(/* principles query */)),
+  withEfSearch((c) => c.query(/* playbooks query */)),
+  withEfSearch((c) => c.query(/* rules query */)),
+  withEfSearch((c) => c.query(/* anti_patterns query */)),
+]);
+
+This preserves parallelism (4 clients, 4 concurrent transactions) at the cost of acquiring 4 connections from the pool instead of 1. For a search workload, this is the right tradeoff — the pool needs to be sized appropriately (default is usually 10).
+
+Option C: Set it globally, skip the transaction wrapping entirely
+
+ALTER DATABASE <dbname> SET hnsw.ef_search = 64;
+
+This sets it as the default for all connections going forward. Zero code change. Downside: every query that ever touches an HNSW index now uses ef_search=64, even queries that don't need it. For Sieve, nothing but the brain retrieval touches HNSW, so this downside is theoretical.
+
+My recommendation: Option C. It's a 1-line DB-level change, zero code modification across 3 workflow files, zero risk of transaction-wrapping bugs. Sieve only has one HNSW consumer (brain retrieval), so there's no collateral impact.
+
+The proposal assumes Option A/B for a good reason — explicit scoping is cleaner architecturally. But for Sieve's current use, Option C is simpler and achieves the same effect.
+
+The Missing Piece: Measurement
+The proposal doesn't include a way to verify the improvement is real. Without measurement, you'll apply all three parts and have no idea whether recall actually improved or the latency impact is acceptable.
+
+Before Part 2 execution, run a baseline:
+Pick 5-10 canonical test queries (the SEO/AEO question you tested earlier is one good example). For each, capture:
+
+Total retrieval time (the scoring trace already has timings.scoring_ms + query time)
+Top 12 selected object IDs
+Average similarity of the top 12
+After Part 2 execution, run the same queries and compare:
+
+If the top 12 objects are different, ef_search=64 is finding better matches
+If similarities are slightly higher on average, recall improved
+If latency went up by 10-30ms, that's expected and fine
+Without this baseline, you can't tell whether the change worked or not. The scoring trace already captures this — you just need to save a before/after snapshot.
+
+Same for Part 3: pick the same queries, capture baseline, compare after switching to RRF. If the top 12 don't change meaningfully, the RRF upgrade isn't worth the code complexity. If they shift noticeably (and subjectively feel more relevant), it is.
+
+Revised Execution Order
+Verify current state (2 minutes): Run the pg_indexes + embedding population queries on Replit's Postgres. This tells you whether Part 1 is needed at all.
+
+Capture baseline (5 minutes): Run 5-10 test queries through Sieve's API, save the scoring traces to a file. This gives you a measurable reference point.
+
+Part 1 (if needed): Create HNSW indexes with CONCURRENTLY. Skip document_chunks if that table doesn't exist.
+
+Part 2 — use Option C: ALTER DATABASE <dbname> SET hnsw.ef_search = 64;. One statement, no code change, immediate effect.
+
+Measure: Run the same test queries, compare to baseline. If recall improved, success.
+
+Part 3 (separate session): Implement RRF. Baseline, execute, measure. Only commit if measurably better.
+
+The Honest Risks
+Part 1 risks: Index build is CPU-intensive. On Replit's Postgres, 22,831 rows × 1536 dims across 4-5 tables will use significant memory during build. CONCURRENTLY helps but doesn't eliminate the load. If Replit's instance is small, the build might be slower than the "2-5 minutes per table" estimate. Monitor memory/CPU during execution.
+
+Part 2 risks: Near zero. ef_search=64 adds ~10-20ms per query at most. If latency matters (it does for AEO answers that need to feel responsive), 64 is the sweet spot. Going to 100+ starts to hurt.
+
+Part 3 risks: 3x database queries per retrieval per table. Currently 4 queries per retrieval (one per table). With RRF, that's 12 queries per retrieval. Connection pool pressure increases. Latency will go up by 50-150ms at the retrieval step. Worth it if recall improves meaningfully, but the cost is real.
+
+The measurement risk: If you skip the baseline, you won't know which of these changes actually helped and which were wasted effort. This is the biggest hidden risk in the plan as written.
+
+Final Verdict
+The plan is 85% correct. The 15% gap:
+
+Verify Part 1 isn't already done before running it
+Prefer Option C (global ALTER DATABASE) over transaction wrapping for Part 2 — simpler, same effect
+Skip document_chunks if the table doesn't exist
+Add before/after measurement using the existing scoring trace — without it, you're optimizing blind
+Fix those four things and the plan is ready to execute.
