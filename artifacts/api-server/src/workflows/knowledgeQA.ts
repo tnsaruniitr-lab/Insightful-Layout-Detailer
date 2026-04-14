@@ -60,7 +60,7 @@ interface QAOutput {
 
 const QAState = Annotation.Root({
   input: Annotation<QAInput>(),
-  questionEmbeddings: Annotation<number[][]>({ value: (_p, n) => n, default: () => [] }),
+  queryPhrases: Annotation<string[]>({ value: (_p, n) => n, default: () => [] }),
   scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
   scoringTrace: Annotation<ScoringTrace | null>({ value: (_p, n) => n, default: () => null }),
   brandContext: Annotation<string | null>({ value: (_p, n) => n, default: () => null }),
@@ -95,7 +95,6 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, label = "op"): Pr
 }
 
 async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateType>> {
-  const embedModel = createEmbeddings();
   const fastModel = createFastModel();
 
   let queryPhrases: string[] = [state.input.question];
@@ -119,18 +118,23 @@ async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateTyp
     // fall back to original question only
   }
 
-  const embeddings = await Promise.all(
-    queryPhrases.map((q) => withRetry(() => embedModel.embedDocuments([q]), 2, "embed_question"))
-  );
-  const vecs = embeddings.map(([e]) => e);
+  logger.info({ question: state.input.question, queryPhrases, phraseCount: queryPhrases.length }, "QA:parseQuestion — reformulations ready");
 
-  logger.info({ question: state.input.question, queryPhrases, vecCount: vecs.length }, "QA:parseQuestion — reformulations + embeddings ready");
-
-  return { questionEmbeddings: vecs };
+  return { queryPhrases };
 }
 
 async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAStateType>> {
-  const vecs = state.questionEmbeddings;
+  const embedModel = createEmbeddings();
+  const phrases = state.queryPhrases.length > 0 ? state.queryPhrases : [state.input.question];
+  const brandPrefix = state.brandContext ? `${state.brandContext}\n` : "";
+  const textsToEmbed = phrases.map((q) => `${brandPrefix}${q}`);
+  const embedResults = await Promise.all(
+    textsToEmbed.map((t) => withRetry(() => embedModel.embedDocuments([t]), 2, "embed_retrieve"))
+  );
+  const vecs = embedResults.map(([e]) => e);
+
+  logger.info({ phraseCount: phrases.length, vecCount: vecs.length, hasBrandPrefix: !!brandPrefix, phrases }, "QA:retrieve — embeddings generated");
+
   const hasVec = vecs.length > 0 && vecs[0].length > 0;
   const domainClause = state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : "";
   const RRF_K = 60;
@@ -341,10 +345,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
 
 async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAStateType>> {
   if (state.input.brandContext) {
-    const embedModel = createEmbeddings();
-    const compositeText = state.input.brandContext + "\n" + state.input.question;
-    const [embedding] = await withRetry(() => embedModel.embedDocuments([compositeText]), 2, "embed_brand_question");
-    return { brandContext: state.input.brandContext, questionEmbeddings: [embedding] };
+    return { brandContext: state.input.brandContext };
   }
   if (!state.input.brandId || !state.input.useBrandContext) return { brandContext: null };
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
@@ -356,10 +357,7 @@ async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAState
     brand.targetGeographiesJson && `Geographies: ${brand.targetGeographiesJson}`,
     brand.productTruthsJson && `Product truths: ${brand.productTruthsJson}`,
   ].filter(Boolean) as string[];
-  const embedModel = createEmbeddings();
-  const compositeText = contextParts.join("\n") + "\n" + state.input.question;
-  const [embedding] = await withRetry(() => embedModel.embedDocuments([compositeText]), 2, "embed_brand_question");
-  return { brandContext: contextParts.join("\n"), questionEmbeddings: [embedding] };
+  return { brandContext: contextParts.join("\n") };
 }
 
 async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAStateType>> {
