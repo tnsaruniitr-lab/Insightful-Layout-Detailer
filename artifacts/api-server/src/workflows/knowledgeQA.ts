@@ -60,7 +60,7 @@ interface QAOutput {
 
 const QAState = Annotation.Root({
   input: Annotation<QAInput>(),
-  questionEmbedding: Annotation<number[]>({ value: (_p, n) => n, default: () => [] }),
+  questionEmbeddings: Annotation<number[][]>({ value: (_p, n) => n, default: () => [] }),
   scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
   scoringTrace: Annotation<ScoringTrace | null>({ value: (_p, n) => n, default: () => null }),
   brandContext: Annotation<string | null>({ value: (_p, n) => n, default: () => null }),
@@ -123,74 +123,147 @@ async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateTyp
     queryPhrases.map((q) => withRetry(() => embedModel.embedDocuments([q]), 2, "embed_question"))
   );
   const vecs = embeddings.map(([e]) => e);
-  const averaged = vecs[0].map((_, i) => vecs.reduce((sum, v) => sum + v[i], 0) / vecs.length);
 
-  return { questionEmbedding: averaged };
+  return { questionEmbeddings: vecs };
 }
 
 async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAStateType>> {
-  const hasVec = state.questionEmbedding.length > 0;
-  const vec = hasVec ? `[${state.questionEmbedding.join(",")}]` : null;
-
+  const vecs = state.questionEmbeddings;
+  const hasVec = vecs.length > 0 && vecs[0].length > 0;
   const domainClause = state.input.domainFilter ? `AND domain_tag = '${state.input.domainFilter}'` : "";
+  const RRF_K = 60;
 
-  const [principleRows, playbookRows, ruleRows, apRows] = await Promise.all([
-    pool.query<{
-      id: number; title: string; statement: string; explanation: string | null;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
-      status: string; cosine_dist: number; embedding_vector: string | null;
-    }>(
-      `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, source_org, status,
-              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
-       FROM principles
-       WHERE status IN ('canonical', 'candidate') ${domainClause}
-       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 40`,
-      hasVec ? [vec] : []
-    ),
-    pool.query<{
-      id: number; name: string; summary: string; use_when: string | null; avoid_when: string | null;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
-      status: string; cosine_dist: number; embedding_vector: string | null;
-    }>(
-      `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score, source_refs_json, source_org, status,
-              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
-       FROM playbooks
-       WHERE status IN ('canonical', 'candidate') ${domainClause}
-       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 40`,
-      hasVec ? [vec] : []
-    ),
-    pool.query<{
-      id: number; name: string; if_condition: string; then_logic: string;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
-      status: string; cosine_dist: number; embedding_vector: string | null;
-    }>(
-      `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, source_org, status,
-              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
-       FROM rules
-       WHERE status IN ('canonical', 'candidate') ${domainClause}
-       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 40`,
-      hasVec ? [vec] : []
-    ),
-    pool.query<{
-      id: number; title: string; description: string; signals_json: string;
-      domain_tag: string; risk_level: string; source_refs_json: string; source_org: string | null;
-      status: string; cosine_dist: number; embedding_vector: string | null;
-    }>(
-      `SELECT id, title, description, signals_json, domain_tag, risk_level, source_refs_json, source_org, status,
-              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
-       FROM anti_patterns
-       WHERE status IN ('canonical', 'candidate') ${domainClause}
-       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 40`,
-      hasVec ? [vec] : []
-    ),
-  ]);
+  type PRow = {
+    id: number; title: string; statement: string; explanation: string | null;
+    domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
+    status: string; cosine_dist: number; embedding_vector: string | null;
+  };
+  type PBRow = {
+    id: number; name: string; summary: string; use_when: string | null; avoid_when: string | null;
+    domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
+    status: string; cosine_dist: number; embedding_vector: string | null;
+  };
+  type RRow = {
+    id: number; name: string; if_condition: string; then_logic: string;
+    domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
+    status: string; cosine_dist: number; embedding_vector: string | null;
+  };
+  type APRow = {
+    id: number; title: string; description: string; signals_json: string;
+    domain_tag: string; risk_level: string; source_refs_json: string; source_org: string | null;
+    status: string; cosine_dist: number; embedding_vector: string | null;
+  };
+
+  function applyRRF<T extends { id: number; cosine_dist: number }>(
+    rankedLists: T[][]
+  ): T[] {
+    const scoreMap = new Map<number, { item: T; rrfScore: number; bestDist: number }>();
+    for (const list of rankedLists) {
+      list.forEach((item, rank) => {
+        const addedScore = 1 / (RRF_K + rank + 1);
+        const existing = scoreMap.get(item.id);
+        if (existing) {
+          existing.rrfScore += addedScore;
+          existing.bestDist = Math.min(existing.bestDist, item.cosine_dist);
+        } else {
+          scoreMap.set(item.id, { item: { ...item }, rrfScore: addedScore, bestDist: item.cosine_dist });
+        }
+      });
+    }
+    return Array.from(scoreMap.values())
+      .sort((a, b) => b.rrfScore - a.rrfScore)
+      .map(({ item, bestDist }) => ({ ...item, cosine_dist: bestDist }));
+  }
+
+  let principleRows: PRow[];
+  let playbookRows: PBRow[];
+  let ruleRows: RRow[];
+  let apRows: APRow[];
+
+  if (!hasVec) {
+    const [pr, pbr, rr, ar] = await Promise.all([
+      pool.query<PRow>(
+        `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, source_org, status,
+                0.5 AS cosine_dist, NULL::text AS embedding_vector
+         FROM principles WHERE status IN ('canonical', 'candidate') ${domainClause} ORDER BY id LIMIT 40`
+      ),
+      pool.query<PBRow>(
+        `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score, source_refs_json, source_org, status,
+                0.5 AS cosine_dist, NULL::text AS embedding_vector
+         FROM playbooks WHERE status IN ('canonical', 'candidate') ${domainClause} ORDER BY id LIMIT 40`
+      ),
+      pool.query<RRow>(
+        `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, source_org, status,
+                0.5 AS cosine_dist, NULL::text AS embedding_vector
+         FROM rules WHERE status IN ('canonical', 'candidate') ${domainClause} ORDER BY id LIMIT 40`
+      ),
+      pool.query<APRow>(
+        `SELECT id, title, description, signals_json, domain_tag, risk_level, source_refs_json, source_org, status,
+                0.5 AS cosine_dist, NULL::text AS embedding_vector
+         FROM anti_patterns WHERE status IN ('canonical', 'candidate') ${domainClause} ORDER BY id LIMIT 40`
+      ),
+    ]);
+    principleRows = pr.rows;
+    playbookRows = pbr.rows;
+    ruleRows = rr.rows;
+    apRows = ar.rows;
+  } else {
+    const allQueries = vecs.flatMap((vec) => {
+      const vecStr = `[${vec.join(",")}]`;
+      return [
+        pool.query<PRow>(
+          `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, source_org, status,
+                  embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text
+           FROM principles WHERE status IN ('canonical', 'candidate') ${domainClause}
+           ORDER BY embedding_vector <=> $1::vector LIMIT 50`,
+          [vecStr]
+        ),
+        pool.query<PBRow>(
+          `SELECT id, name, summary, use_when, avoid_when, domain_tag, confidence_score, source_refs_json, source_org, status,
+                  embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text
+           FROM playbooks WHERE status IN ('canonical', 'candidate') ${domainClause}
+           ORDER BY embedding_vector <=> $1::vector LIMIT 50`,
+          [vecStr]
+        ),
+        pool.query<RRow>(
+          `SELECT id, name, if_condition, then_logic, domain_tag, confidence_score, source_refs_json, source_org, status,
+                  embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text
+           FROM rules WHERE status IN ('canonical', 'candidate') ${domainClause}
+           ORDER BY embedding_vector <=> $1::vector LIMIT 50`,
+          [vecStr]
+        ),
+        pool.query<APRow>(
+          `SELECT id, title, description, signals_json, domain_tag, risk_level, source_refs_json, source_org, status,
+                  embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text
+           FROM anti_patterns WHERE status IN ('canonical', 'candidate') ${domainClause}
+           ORDER BY embedding_vector <=> $1::vector LIMIT 50`,
+          [vecStr]
+        ),
+      ];
+    });
+
+    const results = await Promise.all(allQueries);
+
+    const principlesLists: PRow[][] = [];
+    const playbooksLists: PBRow[][] = [];
+    const rulesLists: RRow[][] = [];
+    const apLists: APRow[][] = [];
+
+    for (let i = 0; i < vecs.length; i++) {
+      principlesLists.push((results[i * 4 + 0] as Awaited<typeof allQueries[0]>).rows as PRow[]);
+      playbooksLists.push((results[i * 4 + 1] as Awaited<typeof allQueries[0]>).rows as PBRow[]);
+      rulesLists.push((results[i * 4 + 2] as Awaited<typeof allQueries[0]>).rows as RRow[]);
+      apLists.push((results[i * 4 + 3] as Awaited<typeof allQueries[0]>).rows as APRow[]);
+    }
+
+    principleRows = applyRRF(principlesLists).slice(0, 40);
+    playbookRows = applyRRF(playbooksLists).slice(0, 40);
+    ruleRows = applyRRF(rulesLists).slice(0, 40);
+    apRows = applyRRF(apLists).slice(0, 40);
+  }
 
   const candidates = [
-    ...principleRows.rows.map((r) => ({
+    ...principleRows.map((r) => ({
       id: r.id, type: "principle" as const,
       title: r.title,
       cosineDist: r.cosine_dist ?? 0.5,
@@ -200,7 +273,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       embeddingVector: parseEmbedding(r.embedding_vector),
       data: { title: r.title, statement: r.statement, explanation: r.explanation, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json, sourceOrg: r.source_org },
     })),
-    ...playbookRows.rows.map((r) => ({
+    ...playbookRows.map((r) => ({
       id: r.id, type: "playbook" as const,
       title: r.name,
       cosineDist: r.cosine_dist ?? 0.5,
@@ -210,7 +283,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       embeddingVector: parseEmbedding(r.embedding_vector),
       data: { name: r.name, summary: r.summary, useWhen: r.use_when, avoidWhen: r.avoid_when, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceRefsJson: r.source_refs_json, sourceOrg: r.source_org },
     })),
-    ...ruleRows.rows.map((r) => ({
+    ...ruleRows.map((r) => ({
       id: r.id, type: "rule" as const,
       title: r.name,
       cosineDist: r.cosine_dist ?? 0.5,
@@ -220,7 +293,7 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
       embeddingVector: parseEmbedding(r.embedding_vector),
       data: { name: r.name, ifCondition: r.if_condition, thenLogic: r.then_logic, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceOrg: r.source_org },
     })),
-    ...apRows.rows.map((r) => ({
+    ...apRows.map((r) => ({
       id: r.id, type: "anti_pattern" as const,
       title: r.title,
       cosineDist: r.cosine_dist ?? 0.5,
@@ -256,7 +329,7 @@ async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAState
     const embedModel = createEmbeddings();
     const compositeText = state.input.brandContext + "\n" + state.input.question;
     const [embedding] = await withRetry(() => embedModel.embedDocuments([compositeText]), 2, "embed_brand_question");
-    return { brandContext: state.input.brandContext, questionEmbedding: embedding };
+    return { brandContext: state.input.brandContext, questionEmbeddings: [embedding] };
   }
   if (!state.input.brandId || !state.input.useBrandContext) return { brandContext: null };
   const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
@@ -271,7 +344,7 @@ async function loadBrandContextNode(state: QAStateType): Promise<Partial<QAState
   const embedModel = createEmbeddings();
   const compositeText = contextParts.join("\n") + "\n" + state.input.question;
   const [embedding] = await withRetry(() => embedModel.embedDocuments([compositeText]), 2, "embed_brand_question");
-  return { brandContext: contextParts.join("\n"), questionEmbedding: embedding };
+  return { brandContext: contextParts.join("\n"), questionEmbeddings: [embedding] };
 }
 
 async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAStateType>> {
