@@ -1,0 +1,162 @@
+The Principle to Fix This
+Retrieval and synthesis serve different purposes and should use brand context differently.
+
+Retrieval should be question-dominant. The question determines what content is RELEVANT.
+Scoring can be brand-aware. Once candidates are retrieved, brand context can re-rank them.
+Synthesis must be brand-aware. The LLM applies retrieved content to the brand's specific situation.
+The current system collapses all three into the embedding step, which breaks when brand and question domains diverge.
+
+The 5 Fix Options (Ranked)
+Option 1: Question-Only Retrieval + Brand-Aware Scoring + Brand-Aware Synthesis (Recommended)
+The cleanest architectural fix.
+
+Stage	What uses brand context
+Embedding	Question-only (ignore brand context here)
+Vector search	Question vector against all brain objects
+Scoring	Existing signals stay — authorityCorroboration, domainAffinityBoost, sourceWeight already use brand-relevant metadata. Add a brand-similarity score that compares candidates to a SEPARATE brand vector (not the query vector).
+Synthesis	Full brand context passed to the LLM prompt — that's where personalization belongs.
+Why this works:
+
+Retrieval finds content that answers the question (no brand dilution)
+Brand-aware scoring still boosts brand-relevant candidates during re-ranking
+Synthesis still personalizes the answer to the specific brand
+Matches how most production RAG systems work (Weaviate, Pinecone, Vertex AI RAG, etc.)
+Trade-off: Lose the brand-weighted retrieval in cases where brand and question align (e.g., "what AEO playbooks apply to us?"). But the existing scoring signals should still surface the right content because candidates will be re-ranked by brand fit after retrieval.
+
+Effort: Small — just don't prepend brand to the embedding query. Keep everything else.
+
+Option 2: Dual Retrieval — Query-Pure + Brand-Weighted, Then Merge
+Run two retrievals:
+
+Query vector alone → top 40 candidates per brain object type
+Query + brand vector → top 40 candidates per brain object type
+Merge, dedupe, re-score, take top 12
+Why this works:
+
+Captures both question-intent results AND brand-weighted results
+Handles the alignment case (brand + question match) and the divergence case (brand + question differ)
+Trade-off:
+
+2x retrieval cost
+More complex pipeline
+Still needs a merge strategy (simple union? weighted interleave?)
+Effort: Medium — requires refactoring the retrieval function to run twice and merge results.
+
+Option 3: Caller-Controlled Mode (Simplest to Ship)
+Add a parameter to the brain API:
+
+brandContextMode: "embedding" | "synthesis_only" | "both"
+
+"embedding" → current behavior, brand prefix in query vector
+"synthesis_only" → brand in LLM prompt only, question-pure retrieval
+"both" → hybrid with lower brand weight (50/50 instead of 100/100)
+Then the caller (strategy-planner skill, audit tool, whatever) decides per-question:
+
+Question type	Mode
+Product/content/AEO questions ("what playbooks apply?")	embedding
+Meta/GTM questions ("how do we get customers?")	synthesis_only
+Ambiguous	both
+Why this works:
+
+Zero architectural commitment — Sieve stays flexible
+Caller has context the retriever doesn't (they know the question's intent)
+Explicit is better than implicit
+Trade-off:
+
+Pushes decision to the caller (they have to classify questions)
+Callers might forget or default wrong
+Effort: Small — one parameter, branching logic in the embed step.
+
+Option 4: Adaptive Mode — Classify the Question Intent
+Before embedding, run a cheap LLM classification to determine if the question is in the brand's domain or not.
+
+If in-domain → use brand-prefixed embedding
+If out-of-domain → use question-only embedding
+Why this works:
+
+"Smart" — no caller burden, no manual mode selection
+Handles edge cases
+Trade-off:
+
+Adds latency (~500ms for classification)
+Adds cost (extra LLM call per query)
+Classification can be wrong
+Debugging is harder when the system "decides" for you
+Effort: Medium — new LLM step, prompt engineering, fallback logic.
+
+Option 5: Question-Weighted Averaging
+Instead of equal weight, weight the question embedding more than the brand embedding:
+
+final_vector = 0.75 * question_vector + 0.25 * brand_vector
+
+Why this works:
+
+Preserves some brand signal in retrieval
+Question dominates direction
+Trade-off:
+
+Magic number tuning (why 75/25? why not 80/20?)
+Doesn't fully solve divergent domains — AnswerMonk's brand vector at 25% weight still pulls AEO content
+Hard to validate which ratio works across different brands
+Effort: Small — just change the averaging step.
+
+The Honest Trade-off Table
+Option	Fixes divergence	Preserves alignment	Complexity	Effort
+1. Question-only embed + brand scoring	✅ Fully	🟡 Partial (via scoring signals)	Low	Small
+2. Dual retrieval	✅ Fully	✅ Fully	High	Medium
+3. Caller-controlled mode	✅ Fully (if caller picks right)	✅ Fully (if caller picks right)	Low	Small
+4. Adaptive classification	✅ Fully (if classifier is right)	✅ Fully (if classifier is right)	High	Medium
+5. Weighted averaging	🟡 Partial	🟡 Partial	Low	Trivial
+My Recommendation: Start with Option 3, Migrate to Option 1
+Ship Option 3 this week (caller-controlled mode):
+
+Add brandContextMode parameter to all 3 brain endpoints
+Default to current behavior ("embedding") for backward compatibility
+The strategy-planner skill and audit tools can start passing "synthesis_only" for out-of-domain questions immediately
+This unblocks the AnswerMonk customer acquisition query and similar cases NOW
+Then plan Option 1 for v2 (in a few weeks):
+
+Once you have data from callers using Option 3, look at the pattern:
+
+If callers are almost always picking "synthesis_only" for growth questions → make it the default
+If "embedding" mode is rarely helping → remove brand prefix from embeddings entirely
+Move the brand signal into the scoring step (where it already lives, via domainAffinityBoost, authorityCorroboration, etc.)
+Why this sequence:
+
+Option 3 is a minimal, reversible change that unblocks real queries
+Option 1 is the architecturally correct answer but needs real usage data before committing
+Avoids over-engineering without evidence
+The Rule for the Strategy-Planner Skill
+Tell the skill how to pick the mode:
+
+Question pattern	Mode
+"What should this brand do about [their product domain]?" (AEO, content, SEO, schema)	"embedding"
+"What's the best [marketing tactic] for this brand?" (growth, sales, pricing)	"synthesis_only"
+Anti-pattern questions ("what should we avoid?")	"synthesis_only" — anti-patterns are usually cross-domain
+Channel questions ("what channels fit?")	"synthesis_only" — channel content is rarely brand-domain
+Technical/implementation questions	"embedding"
+Positioning / messaging questions	"synthesis_only"
+This classification is manageable — the skill writer can add question-type routing logic in ~20 lines of conditionals.
+
+The Deeper Insight
+This bug actually reveals a subtle failure mode in brand-aware RAG:
+
+A brand's identity is a retrieval SHORTCUT when the question is in-domain, and a retrieval POISON when the question is out-of-domain.
+
+Every brand has a "domain of expertise" (AnswerMonk = AEO, TRYPS = group travel, Valeo = healthcare). For in-domain questions, brand context tightens retrieval. For out-of-domain questions, brand context pulls you away from the correct content.
+
+The right system recognizes this distinction and applies brand context selectively.
+
+One Last Note on Why Option 1 (Not Prepending) Won't Break Alignment Cases
+You might worry: "If I stop prepending brand to embeddings, won't the in-domain cases (asking AnswerMonk about AEO) get worse?"
+
+No — here's why:
+
+The question "what AEO playbooks apply to this brand?" contains "AEO playbooks" in the question itself
+That phrase alone steers retrieval toward AEO content without needing brand context
+Brand context was never the PRIMARY driver of retrieval for in-domain questions — it was a minor booster
+The scoring step (with authorityCorroboration, domainAffinityBoost, sourceWeight) already re-ranks based on brand fit
+Brand context prefix is a retrieval CRUTCH that works when the crutch aligns with the question, and actively hurts when it doesn't. Removing the crutch forces the question to carry its own retrieval signal, which is actually cleaner.
+
+What to Tell the Replit Agent
+Short version: "Brand context in the embedding step is dominating retrieval for out-of-domain questions. Add a brandContextMode parameter ('embedding' | 'synthesis_only' | 'both', default 'embedding' for backward compat). When mode is 'synthesis_only', skip the brand prefix in the query embedding phases but still pass brand context to the synthesis prompt. Keep the current scoring pipeline (it already has brand-aware signals via domainAffinityBoost and authorityCorroboration). Test by re-running the AnswerMonk 'how to get customers' question with brandContextMode: 'synthesis_only' — it should return the 0.90 confidence B2B GTM content we saw when the brand context was absent."
