@@ -124,6 +124,8 @@ async function parseQuestionNode(state: QAStateType): Promise<Partial<QAStateTyp
   );
   const vecs = embeddings.map(([e]) => e);
 
+  logger.info({ question: state.input.question, queryPhrases, vecCount: vecs.length }, "QA:parseQuestion — reformulations + embeddings ready");
+
   return { questionEmbeddings: vecs };
 }
 
@@ -260,6 +262,19 @@ async function retrieveAndScoreNode(state: QAStateType): Promise<Partial<QAState
     playbookRows = applyRRF(playbooksLists).slice(0, 40);
     ruleRows = applyRRF(rulesLists).slice(0, 40);
     apRows = applyRRF(apLists).slice(0, 40);
+
+    logger.info({
+      vecCount: vecs.length,
+      principleCount: principleRows.length,
+      playbookCount: playbookRows.length,
+      ruleCount: ruleRows.length,
+      apCount: apRows.length,
+      topPrincipleDist: principleRows[0]?.cosine_dist?.toFixed(4),
+      topPlaybookDist: playbookRows[0]?.cosine_dist?.toFixed(4),
+      topRuleDist: ruleRows[0]?.cosine_dist?.toFixed(4),
+      topPlaybook: playbookRows[0]?.name,
+      topPrinciple: principleRows[0]?.title,
+    }, "QA:retrieve — HNSW+RRF results per table");
   }
 
   const candidates = [
@@ -354,8 +369,18 @@ async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAState
     ? state.scoredObjects.reduce((s, o) => s + o.similarity, 0) / state.scoredObjects.length
     : 0;
 
+  logger.info({
+    question: state.input.question,
+    candidateCount: state.scoredObjects.length,
+    topSimilarity: +topSimilarity.toFixed(4),
+    avgSimilarity: +avgSimilarity.toFixed(4),
+    threshold: LOW_CONFIDENCE_THRESHOLD,
+    willTriggerLowConf: topSimilarity < LOW_CONFIDENCE_THRESHOLD || avgSimilarity < 0.15,
+    topObjects: state.scoredObjects.slice(0, 3).map((o) => ({ id: o.id, type: o.type, title: o.title, similarity: +o.similarity.toFixed(4) })),
+  }, "QA:synthesize — similarity check before LLM");
+
   if (topSimilarity < LOW_CONFIDENCE_THRESHOLD || avgSimilarity < 0.15) {
-    logger.info({ topSimilarity, avgSimilarity, question: state.input.question }, "QA: low similarity — returning insufficient knowledge response");
+    logger.info({ topSimilarity, avgSimilarity, question: state.input.question }, "QA:synthesize — low similarity threshold triggered → confidence:0");
     return {
       answer: {
         knownPrinciples: "The knowledge library does not contain sufficiently relevant information to answer this question.",
@@ -538,12 +563,19 @@ async function persistRunNode(state: QAStateType): Promise<Partial<QAStateType>>
     }).catch((err) => logger.error({ err }, "Failed to write query trace"));
   }
 
+  const finalConfidence = Math.min(1, Math.max(0, answer.confidence ?? 0.5));
+  logger.info({
+    question: state.input.question,
+    finalConfidence,
+    sourceRefCount: sourceRefs.length,
+  }, "QA:output — final answer ready");
+
   const output: QAOutput = {
     id: run.id,
     runType: "knowledge_answer",
     query: state.input.question,
     rationale_summary: answer.rationale,
-    confidence: Math.min(1, Math.max(0, answer.confidence ?? 0.5)),
+    confidence: finalConfidence,
     missing_data: answer.missingDataSummary,
     sections: {
       knownPrinciples: answer.knownPrinciples,
