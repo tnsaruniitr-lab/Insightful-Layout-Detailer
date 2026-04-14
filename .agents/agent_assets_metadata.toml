@@ -12,3 +12,9 @@ id = "6y65TOd5XQS4f_vRUxAjt"
 uri = "file://artifacts/sieve/public/audit-latest.json"
 type = "unspecified"
 title = "Brain Audit — Full JSON (79KB)"
+
+[[outputs]]
+id = "dWGfshaMIhH5q4h9jUUIG"
+uri = "file://attached_assets/all_document_titles.csv"
+type = "table"
+title = "All 1,775 Document Titles"
