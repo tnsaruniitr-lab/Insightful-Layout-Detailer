@@ -67,7 +67,7 @@ interface StrategyOutput {
 const StrategyState = Annotation.Root({
   input: Annotation<StrategyInput>(),
   brandContext: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
-  brandEmbedding: Annotation<number[]>({ value: (_p, n) => n, default: () => [] }),
+  brandEmbeddings: Annotation<number[][]>({ value: (_p, n) => n, default: () => [] }),
   scoredObjects: Annotation<ScoredCandidate[]>({ value: (_p, n) => n, default: () => [] }),
   scoringTrace: Annotation<ScoringTrace | null>({ value: (_p, n) => n, default: () => null }),
   lastPrompt: Annotation<string>({ value: (_p, n) => n, default: () => "" }),
@@ -102,77 +102,157 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, label = "op"): Pr
 }
 
 async function loadBrandContextNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
-  if (state.input.brandContext) {
-    const embedModel = createEmbeddings();
-    const [embedding] = await withRetry(() => embedModel.embedDocuments([state.input.brandContext!]), 2, "embed_brand_strategy");
-    return { brandContext: state.input.brandContext, brandEmbedding: embedding };
-  }
-  if (!state.input.brandId) throw new Error("Either brandId or brandContext must be provided");
-  const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
-  if (!brand) throw new Error(`Brand ${state.input.brandId} not found`);
-  const competitors = await db.select().from(competitorsTable).where(eq(competitorsTable.brandId, state.input.brandId));
-  const contextParts = [
-    `Brand: ${brand.name}`,
-    brand.icpDescription && `ICP: ${brand.icpDescription}`,
-    brand.positioningStatement && `Positioning: ${brand.positioningStatement}`,
-    brand.targetGeographiesJson && `Geographies: ${brand.targetGeographiesJson}`,
-    brand.productTruthsJson && `Product Truths: ${brand.productTruthsJson}`,
-    brand.toneDescriptorsJson && `Tone: ${brand.toneDescriptorsJson}`,
-    competitors.length > 0 && `Competitors: ${competitors.map((c) => c.name).join(", ")}`,
-  ].filter(Boolean);
-  const brandContext = contextParts.join("\n");
   const embedModel = createEmbeddings();
-  const [embedding] = await withRetry(() => embedModel.embedDocuments([brandContext]), 2, "embed_brand_strategy");
-  return { brandContext, brandEmbedding: embedding };
+
+  let brandContext: string;
+  let icpPositioning: string;
+  let productOutcomes: string;
+
+  if (state.input.brandContext) {
+    brandContext = state.input.brandContext;
+    icpPositioning = `ICP and positioning focus:\n${state.input.brandContext}`;
+    productOutcomes = `Product truths and expected outcomes:\n${state.input.brandContext}`;
+  } else {
+    if (!state.input.brandId) throw new Error("Either brandId or brandContext must be provided");
+    const [brand] = await db.select().from(brandsTable).where(eq(brandsTable.id, state.input.brandId)).limit(1);
+    if (!brand) throw new Error(`Brand ${state.input.brandId} not found`);
+    const competitors = await db.select().from(competitorsTable).where(eq(competitorsTable.brandId, state.input.brandId));
+
+    const contextParts = [
+      `Brand: ${brand.name}`,
+      brand.icpDescription && `ICP: ${brand.icpDescription}`,
+      brand.positioningStatement && `Positioning: ${brand.positioningStatement}`,
+      brand.targetGeographiesJson && `Geographies: ${brand.targetGeographiesJson}`,
+      brand.productTruthsJson && `Product Truths: ${brand.productTruthsJson}`,
+      brand.toneDescriptorsJson && `Tone: ${brand.toneDescriptorsJson}`,
+      competitors.length > 0 && `Competitors: ${competitors.map((c) => c.name).join(", ")}`,
+    ].filter(Boolean);
+    brandContext = contextParts.join("\n");
+
+    icpPositioning = [
+      `Brand: ${brand.name}`,
+      brand.icpDescription && `ICP: ${brand.icpDescription}`,
+      brand.positioningStatement && `Positioning: ${brand.positioningStatement}`,
+      brand.targetGeographiesJson && `Target markets: ${brand.targetGeographiesJson}`,
+      competitors.length > 0 && `Competing against: ${competitors.map((c) => c.name).join(", ")}`,
+    ].filter(Boolean).join("\n");
+
+    productOutcomes = [
+      `Brand: ${brand.name}`,
+      brand.productTruthsJson && `Product truths: ${brand.productTruthsJson}`,
+      brand.toneDescriptorsJson && `Communication style: ${brand.toneDescriptorsJson}`,
+      brand.positioningStatement && `Value proposition: ${brand.positioningStatement}`,
+    ].filter(Boolean).join("\n");
+  }
+
+  const perspectives = [brandContext, icpPositioning, productOutcomes];
+  const embeddings = await Promise.all(
+    perspectives.map((text) => withRetry(() => embedModel.embedDocuments([text]), 2, "embed_brand_strategy"))
+  );
+  const vecs = embeddings.map(([e]) => e);
+
+  return { brandContext, brandEmbeddings: vecs };
 }
 
 async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<StrategyStateType>> {
-  const hasVec = state.brandEmbedding.length > 0;
-  const vec = hasVec ? `[${state.brandEmbedding.join(",")}]` : null;
+  const vecs = state.brandEmbeddings;
+  const hasVec = vecs.length > 0 && vecs[0].length > 0;
+  const RRF_K = 60;
 
-  const [playbookRows, principleRows, apRows] = await Promise.all([
-    pool.query<{
-      id: number; name: string; summary: string; use_when: string | null; expected_outcomes: string | null;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
-      status: string; cosine_dist: number; embedding_vector: string | null;
-    }>(
-      `SELECT id, name, summary, use_when, expected_outcomes, domain_tag, confidence_score, source_refs_json, source_org, status,
-              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
-       FROM playbooks
-       WHERE status IN ('canonical', 'candidate')
-       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 40`,
-      hasVec ? [vec] : []
-    ),
-    pool.query<{
-      id: number; title: string; statement: string; explanation: string | null;
-      domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
-      status: string; cosine_dist: number; embedding_vector: string | null;
-    }>(
-      `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, source_org, status,
-              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
-       FROM principles
-       WHERE status IN ('canonical', 'candidate')
-       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 40`,
-      hasVec ? [vec] : []
-    ),
-    pool.query<{
-      id: number; title: string; description: string; domain_tag: string; risk_level: string;
-      source_refs_json: string; source_org: string | null; status: string; cosine_dist: number; embedding_vector: string | null;
-    }>(
-      `SELECT id, title, description, domain_tag, risk_level, source_refs_json, source_org, status,
-              ${hasVec ? `embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text` : "0.5 AS cosine_dist, NULL::text AS embedding_vector"}
-       FROM anti_patterns
-       WHERE status IN ('canonical', 'candidate')
-       ${hasVec ? "ORDER BY embedding_vector <=> $1::vector" : "ORDER BY id"}
-       LIMIT 40`,
-      hasVec ? [vec] : []
-    ),
-  ]);
+  type PBRow = {
+    id: number; name: string; summary: string; use_when: string | null; expected_outcomes: string | null;
+    domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
+    status: string; cosine_dist: number; embedding_vector: string | null;
+  };
+  type PRow = {
+    id: number; title: string; statement: string; explanation: string | null;
+    domain_tag: string; confidence_score: string | null; source_refs_json: string; source_org: string | null;
+    status: string; cosine_dist: number; embedding_vector: string | null;
+  };
+  type APRow = {
+    id: number; title: string; description: string; domain_tag: string; risk_level: string;
+    source_refs_json: string; source_org: string | null; status: string; cosine_dist: number; embedding_vector: string | null;
+  };
+
+  function applyRRF<T extends { id: number; cosine_dist: number }>(rankedLists: T[][]): T[] {
+    const scoreMap = new Map<number, { item: T; rrfScore: number; bestDist: number }>();
+    for (const list of rankedLists) {
+      list.forEach((item, rank) => {
+        const addedScore = 1 / (RRF_K + rank + 1);
+        const existing = scoreMap.get(item.id);
+        if (existing) {
+          existing.rrfScore += addedScore;
+          existing.bestDist = Math.min(existing.bestDist, item.cosine_dist);
+        } else {
+          scoreMap.set(item.id, { item: { ...item }, rrfScore: addedScore, bestDist: item.cosine_dist });
+        }
+      });
+    }
+    return Array.from(scoreMap.values())
+      .sort((a, b) => b.rrfScore - a.rrfScore)
+      .map(({ item, bestDist }) => ({ ...item, cosine_dist: bestDist }));
+  }
+
+  let playbookRows: PBRow[];
+  let principleRows: PRow[];
+  let apRows: APRow[];
+
+  if (!hasVec) {
+    const [pbr, pr, ar] = await Promise.all([
+      pool.query<PBRow>(`SELECT id, name, summary, use_when, expected_outcomes, domain_tag, confidence_score, source_refs_json, source_org, status, 0.5 AS cosine_dist, NULL::text AS embedding_vector FROM playbooks WHERE status IN ('canonical', 'candidate') ORDER BY id LIMIT 40`),
+      pool.query<PRow>(`SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, source_org, status, 0.5 AS cosine_dist, NULL::text AS embedding_vector FROM principles WHERE status IN ('canonical', 'candidate') ORDER BY id LIMIT 40`),
+      pool.query<APRow>(`SELECT id, title, description, domain_tag, risk_level, source_refs_json, source_org, status, 0.5 AS cosine_dist, NULL::text AS embedding_vector FROM anti_patterns WHERE status IN ('canonical', 'candidate') ORDER BY id LIMIT 40`),
+    ]);
+    playbookRows = pbr.rows;
+    principleRows = pr.rows;
+    apRows = ar.rows;
+  } else {
+    const allQueries = vecs.flatMap((vec) => {
+      const vecStr = `[${vec.join(",")}]`;
+      return [
+        pool.query<PBRow>(
+          `SELECT id, name, summary, use_when, expected_outcomes, domain_tag, confidence_score, source_refs_json, source_org, status,
+                  embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text
+           FROM playbooks WHERE status IN ('canonical', 'candidate')
+           ORDER BY embedding_vector <=> $1::vector LIMIT 50`,
+          [vecStr]
+        ),
+        pool.query<PRow>(
+          `SELECT id, title, statement, explanation, domain_tag, confidence_score, source_refs_json, source_org, status,
+                  embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text
+           FROM principles WHERE status IN ('canonical', 'candidate')
+           ORDER BY embedding_vector <=> $1::vector LIMIT 50`,
+          [vecStr]
+        ),
+        pool.query<APRow>(
+          `SELECT id, title, description, domain_tag, risk_level, source_refs_json, source_org, status,
+                  embedding_vector <=> $1::vector AS cosine_dist, embedding_vector::text
+           FROM anti_patterns WHERE status IN ('canonical', 'candidate')
+           ORDER BY embedding_vector <=> $1::vector LIMIT 50`,
+          [vecStr]
+        ),
+      ];
+    });
+
+    const results = await Promise.all(allQueries);
+
+    const pbLists: PBRow[][] = [];
+    const pLists: PRow[][] = [];
+    const apLists: APRow[][] = [];
+
+    for (let i = 0; i < vecs.length; i++) {
+      pbLists.push((results[i * 3 + 0] as Awaited<typeof allQueries[0]>).rows as PBRow[]);
+      pLists.push((results[i * 3 + 1] as Awaited<typeof allQueries[0]>).rows as PRow[]);
+      apLists.push((results[i * 3 + 2] as Awaited<typeof allQueries[0]>).rows as APRow[]);
+    }
+
+    playbookRows = applyRRF(pbLists).slice(0, 40);
+    principleRows = applyRRF(pLists).slice(0, 40);
+    apRows = applyRRF(apLists).slice(0, 40);
+  }
 
   const candidates = [
-    ...playbookRows.rows.map((r) => ({
+    ...playbookRows.map((r) => ({
       id: r.id, type: "playbook" as const, title: r.name,
       cosineDist: r.cosine_dist ?? 0.5,
       confidence: parseFloat(r.confidence_score ?? "0.7"),
@@ -181,7 +261,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
       embeddingVector: parseEmbedding(r.embedding_vector),
       data: { name: r.name, summary: r.summary, useWhen: r.use_when, expectedOutcomes: r.expected_outcomes, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceOrg: r.source_org },
     })),
-    ...principleRows.rows.map((r) => ({
+    ...principleRows.map((r) => ({
       id: r.id, type: "principle" as const, title: r.title,
       cosineDist: r.cosine_dist ?? 0.5,
       confidence: parseFloat(r.confidence_score ?? "0.7"),
@@ -190,7 +270,7 @@ async function retrieveAndScoreNode(state: StrategyStateType): Promise<Partial<S
       embeddingVector: parseEmbedding(r.embedding_vector),
       data: { title: r.title, statement: r.statement, explanation: r.explanation, domainTag: r.domain_tag, confidenceScore: r.confidence_score, sourceOrg: r.source_org },
     })),
-    ...apRows.rows.map((r) => ({
+    ...apRows.map((r) => ({
       id: r.id, type: "anti_pattern" as const, title: r.title,
       cosineDist: r.cosine_dist ?? 0.5,
       confidence: 0.4,
