@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { fullSyncToSupabase } from "../lib/supabaseSync";
-import { eq, and, desc, type SQL } from "drizzle-orm";
+import { eq, and, desc, inArray, type SQL } from "drizzle-orm";
 import { db, pool } from "@workspace/db";
 import {
   principlesTable,
@@ -25,6 +25,10 @@ import {
   GetBrandStrategyBody,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
+import { randomUUID } from "crypto";
+import { z } from "zod/v4";
+import { ObjectStorageService } from "../lib/objectStorage";
+import { classifySourceAuthority, tierToTrustLevel } from "../lib/sourceClassifier";
 
 type DomainTag = "seo" | "geo" | "aeo" | "content" | "entity" | "general";
 type BrainStatus = "canonical" | "candidate";
@@ -594,6 +598,259 @@ router.post("/brain/conflicts/:id/resolve", async (req: Request, res: Response):
     }
   } catch (err) {
     logger.error({ err, id, table, action }, "Resolve conflict failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+const BATCH_CONCURRENCY = 5;
+const MAX_BATCH_SIZE = 200;
+const MIN_CONTENT_CHARS = 200;
+const MAX_CONTENT_CHARS = 500_000;
+
+const BatchDocumentSchema = z.object({
+  title: z.string().min(1).max(500),
+  content: z.string().min(MIN_CONTENT_CHARS, { message: `Content must be at least ${MIN_CONTENT_CHARS} characters` }).max(MAX_CONTENT_CHARS),
+  sourceUrl: z.string().url().optional().or(z.literal("")).transform((v) => (v === "" ? undefined : v)),
+  trustLevel: z.enum(["high", "medium", "low"]).optional().default("medium"),
+  domainTag: z.enum(["seo", "geo", "aeo", "content", "entity", "general"]).optional().default("general"),
+  author: z.string().max(200).optional(),
+});
+
+const IngestBatchBody = z.object({
+  documents: z.array(BatchDocumentSchema).min(1).max(MAX_BATCH_SIZE),
+});
+
+function looksLikeHtml(text: string): boolean {
+  const lower = text.slice(0, 2000).toLowerCase();
+  return lower.includes("<!doctype") || lower.includes("<html") || lower.includes("<body");
+}
+
+function processBatchWithConcurrency(ids: number[]): void {
+  const queue = [...ids];
+  const worker = async (): Promise<void> => {
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      try {
+        const { runIngestionGraph } = await import("../workflows/ingestion");
+        await runIngestionGraph(id);
+      } catch (err) {
+        logger.error({ err, docId: id }, "Batch ingestion worker error");
+      }
+    }
+  };
+  const slots = Math.min(BATCH_CONCURRENCY, ids.length);
+  void Promise.all(Array.from({ length: slots }, worker));
+}
+
+router.post("/brain/ingest-batch", async (req: Request, res: Response): Promise<void> => {
+  const parsed = IngestBatchBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+    return;
+  }
+
+  const { documents } = parsed.data;
+  const batchId = randomUUID();
+  const objectStorage = new ObjectStorageService();
+
+  const accepted: { id: number; title: string }[] = [];
+  const skipped: { title: string; reason: string }[] = [];
+  const rejected: { title: string; reason: string }[] = [];
+
+  const existingUrls = new Set<string>();
+  const existingTitles = new Set<string>();
+
+  const candidateUrls = documents.map((d) => d.sourceUrl).filter(Boolean) as string[];
+  const candidateTitles = documents.map((d) => d.title);
+
+  try {
+    if (candidateUrls.length > 0) {
+      const urlRows = await db
+        .select({ sourceUrl: documentsTable.sourceUrl })
+        .from(documentsTable)
+        .where(inArray(documentsTable.sourceUrl, candidateUrls));
+      for (const r of urlRows) if (r.sourceUrl) existingUrls.add(r.sourceUrl);
+    }
+
+    const titleRows = await db
+      .select({ title: documentsTable.title })
+      .from(documentsTable)
+      .where(inArray(documentsTable.title, candidateTitles));
+    for (const r of titleRows) existingTitles.add(r.title);
+  } catch (err) {
+    logger.error({ err, batchId }, "Duplicate pre-flight check failed");
+    res.status(500).json({ error: "Pre-flight duplicate check failed" });
+    return;
+  }
+
+  const seenTitlesThisBatch = new Set<string>();
+
+  for (const doc of documents) {
+    if (looksLikeHtml(doc.content)) {
+      rejected.push({ title: doc.title, reason: "HTML content detected — submit plain text or markdown only" });
+      continue;
+    }
+    if (doc.sourceUrl && existingUrls.has(doc.sourceUrl)) {
+      skipped.push({ title: doc.title, reason: `Duplicate source_url: ${doc.sourceUrl}` });
+      continue;
+    }
+    if (existingTitles.has(doc.title) || seenTitlesThisBatch.has(doc.title)) {
+      skipped.push({ title: doc.title, reason: `Duplicate title: ${doc.title}` });
+      continue;
+    }
+
+    seenTitlesThisBatch.add(doc.title);
+
+    let storagePath = "";
+    let trustLevel = doc.trustLevel;
+    let authorityTier: string | undefined;
+    let sourceOrg: string | undefined;
+    let classifierConfidence: string | undefined;
+
+    try {
+      const textBuffer = Buffer.from(doc.content, "utf-8");
+      const { objectPath } = await objectStorage.uploadBuffer(textBuffer, "text/plain");
+      storagePath = objectPath;
+    } catch (err) {
+      logger.error({ err, title: doc.title, batchId }, "Object storage upload failed for batch doc");
+      rejected.push({ title: doc.title, reason: "Storage upload failed" });
+      continue;
+    }
+
+    if (doc.sourceUrl) {
+      try {
+        const classification = await classifySourceAuthority(doc.sourceUrl);
+        sourceOrg = classification.sourceOrg;
+        authorityTier = classification.tier;
+        classifierConfidence = String(classification.confidence);
+        if (doc.trustLevel === "medium") {
+          trustLevel = tierToTrustLevel(classification.tier);
+        }
+      } catch {
+        // non-blocking: classification failure doesn't block ingestion
+      }
+    }
+
+    try {
+      const [inserted] = await db
+        .insert(documentsTable)
+        .values({
+          title: doc.title,
+          sourceType: "text",
+          domainTag: doc.domainTag,
+          author: doc.author,
+          sourceUrl: doc.sourceUrl,
+          storagePath,
+          rawTextStatus: "pending",
+          trustLevel,
+          sourceOrg,
+          authorityTier,
+          classifierConfidence,
+          batchId,
+        })
+        .returning({ id: documentsTable.id });
+      accepted.push({ id: inserted.id, title: doc.title });
+    } catch (err) {
+      logger.error({ err, title: doc.title, batchId }, "DB insert failed for batch doc");
+      rejected.push({ title: doc.title, reason: "Database insert failed" });
+    }
+  }
+
+  if (accepted.length > 0) {
+    processBatchWithConcurrency(accepted.map((d) => d.id));
+  }
+
+  logger.info(
+    { batchId, accepted: accepted.length, skipped: skipped.length, rejected: rejected.length },
+    "Batch ingestion submitted"
+  );
+
+  res.status(202).json({
+    batchId,
+    totalSubmitted: documents.length,
+    accepted: accepted.length,
+    skipped: skipped.length,
+    rejected: rejected.length,
+    acceptedIds: accepted.map((d) => d.id),
+    acceptedTitles: accepted.map((d) => d.title),
+    skippedReasons: skipped,
+    rejectedReasons: rejected,
+    estimatedMinutes: Math.ceil(accepted.length * 1.5),
+  });
+});
+
+router.get("/brain/ingest-batch/:batchId/status", async (req: Request, res: Response): Promise<void> => {
+  const { batchId } = req.params;
+  if (!batchId) {
+    res.status(400).json({ error: "Missing batchId" });
+    return;
+  }
+
+  try {
+    const docs = await db
+      .select({ id: documentsTable.id, rawTextStatus: documentsTable.rawTextStatus, createdAt: documentsTable.createdAt })
+      .from(documentsTable)
+      .where(eq(documentsTable.batchId, batchId));
+
+    if (docs.length === 0) {
+      res.status(404).json({ error: `No documents found for batchId: ${batchId}` });
+      return;
+    }
+
+    const counts = { total: docs.length, done: 0, processing: 0, pending: 0, error: 0 };
+    for (const d of docs) {
+      if (d.rawTextStatus === "done") counts.done++;
+      else if (d.rawTextStatus === "processing") counts.processing++;
+      else if (d.rawTextStatus === "pending") counts.pending++;
+      else if (d.rawTextStatus === "error") counts.error++;
+    }
+
+    const complete = counts.done + counts.error === counts.total;
+
+    let extractionSummary: Record<string, number> | undefined;
+    if (complete && counts.done > 0) {
+      const docIds = docs.map((d) => d.id);
+      const [princRow, ruleRow, playbookRow, antiRow] = await Promise.all([
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM principles WHERE EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(source_refs_json::jsonb) AS elem
+            WHERE elem::int = ANY($1::int[])
+          )`,
+          [docIds]
+        ),
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM rules WHERE EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(source_refs_json::jsonb) AS elem
+            WHERE elem::int = ANY($1::int[])
+          )`,
+          [docIds]
+        ),
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM playbooks WHERE EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(source_refs_json::jsonb) AS elem
+            WHERE elem::int = ANY($1::int[])
+          )`,
+          [docIds]
+        ),
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM anti_patterns WHERE EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(source_refs_json::jsonb) AS elem
+            WHERE elem::int = ANY($1::int[])
+          )`,
+          [docIds]
+        ),
+      ]);
+      extractionSummary = {
+        principles: parseInt(princRow.rows[0]?.count ?? "0", 10),
+        rules: parseInt(ruleRow.rows[0]?.count ?? "0", 10),
+        playbooks: parseInt(playbookRow.rows[0]?.count ?? "0", 10),
+        antiPatterns: parseInt(antiRow.rows[0]?.count ?? "0", 10),
+      };
+    }
+
+    res.json({ batchId, complete, counts, extractionSummary });
+  } catch (err) {
+    logger.error({ err, batchId }, "Failed to get batch status");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

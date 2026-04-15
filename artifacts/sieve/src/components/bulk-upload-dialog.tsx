@@ -9,7 +9,7 @@ import { UploadDocumentFormDomainTag, UploadDocumentFormTrustLevel } from "@work
 import { Upload, CheckCircle2, AlertCircle, Loader2, X, FileText, Sparkles } from "lucide-react";
 
 const CONCURRENCY = 5;
-const MAX_POLLS = 50;
+const MAX_POLLS = 100;
 const POLL_MS = 3000;
 
 const TIER_LABELS: Record<string, string> = {
@@ -106,7 +106,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
     const all = Array.from(files);
-    const capped = all.slice(0, 50);
+    const capped = all.slice(0, 200);
     const dropped = all.length - capped.length;
     setDroppedCount(dropped > 0 ? dropped : 0);
     const newItems: BulkItem[] = capped.map((file) => ({
@@ -271,7 +271,7 @@ export function BulkUploadDialog({ open, onOpenChange, onComplete, activeBrandId
               {droppedCount > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  {droppedCount} file{droppedCount !== 1 ? "s" : ""} not added — limit is 50.
+                  {droppedCount} file{droppedCount !== 1 ? "s" : ""} not added — limit is 200.
                 </div>
               )}
             </>

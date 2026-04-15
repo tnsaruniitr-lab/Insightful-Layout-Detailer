@@ -75,6 +75,7 @@ export const documentsTable = pgTable("documents", {
   authorityTier: text("authority_tier"),
   classifierConfidence: numeric("classifier_confidence", { precision: 4, scale: 3 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  batchId: text("batch_id"),
 });
 
 export const insertDocumentSchema = createInsertSchema(documentsTable).omit({
