@@ -15,6 +15,7 @@ import { eq, inArray } from "drizzle-orm";
 import { createFastModel, createStrongModel, createEmbeddings } from "../lib/llm";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { logger } from "../lib/logger";
+import { classifySourceAuthority, tierToTrustLevel } from "../lib/sourceClassifier";
 
 const DEDUPE_SIMILARITY_THRESHOLD = 0.92;
 const ENRICHMENT_MIN_THRESHOLD = 0.88;
@@ -220,12 +221,27 @@ async function extractTextNode(state: IngestionStateType): Promise<Partial<Inges
 
   if (embeddedSourceOrg || embeddedSourceUrl || embeddedDomain) {
     const validDomainTags: DomainTag[] = ["seo", "geo", "aeo", "content", "entity", "general"];
-    const updateFields: Partial<{ domainTag: DomainTag; sourceOrg: string; sourceUrl: string }> = {};
+    const updateFields: Partial<{ domainTag: DomainTag; sourceOrg: string; sourceUrl: string; authorityTier: string; classifierConfidence: string; trustLevel: "high" | "medium" | "low" }> = {};
     if (embeddedDomain && validDomainTags.includes(embeddedDomain as DomainTag)) {
       updateFields.domainTag = embeddedDomain as DomainTag;
     }
-    if (embeddedSourceOrg) updateFields.sourceOrg = embeddedSourceOrg;
     if (embeddedSourceUrl) updateFields.sourceUrl = embeddedSourceUrl;
+    if (embeddedSourceUrl) {
+      try {
+        const reclassified = await classifySourceAuthority(embeddedSourceUrl);
+        updateFields.sourceOrg = reclassified.sourceOrg;
+        updateFields.authorityTier = reclassified.tier;
+        updateFields.classifierConfidence = String(reclassified.confidence);
+        if (doc.trustLevel === "low" || doc.sourceOrg === "Personal Blog") {
+          updateFields.trustLevel = tierToTrustLevel(reclassified.tier);
+        }
+        logger.info({ docId: state.documentId, sourceOrg: reclassified.sourceOrg, tier: reclassified.tier }, "Source reclassified from embedded URL");
+      } catch {
+        if (embeddedSourceOrg) updateFields.sourceOrg = embeddedSourceOrg;
+      }
+    } else if (embeddedSourceOrg) {
+      updateFields.sourceOrg = embeddedSourceOrg;
+    }
     if (Object.keys(updateFields).length > 0) {
       await db.update(documentsTable).set(updateFields).where(eq(documentsTable.id, state.documentId));
     }

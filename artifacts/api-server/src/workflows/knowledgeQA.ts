@@ -5,8 +5,9 @@ import {
   mappingRunsTable,
   mappingRunSourcesTable,
   queryTracesTable,
+  playbookStepsTable,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createEmbeddings, createFastModel, invokeSynthesisModel, DEFAULT_SYNTHESIS_MODEL, type SynthesisModelId } from "../lib/llm";
 import { logger } from "../lib/logger";
 import {
@@ -402,10 +403,29 @@ async function synthesizeAnswerNode(state: QAStateType): Promise<Partial<QAState
     return `• [P:${p.id}] ${d.title}: ${d.statement}${d.explanation ? ` — ${d.explanation}` : ""}`;
   }).join("\n");
 
+  const playbookIds = playbooks.map((p) => p.id);
+  const allSteps = playbookIds.length > 0
+    ? await db
+        .select()
+        .from(playbookStepsTable)
+        .where(inArray(playbookStepsTable.playbookId, playbookIds))
+        .orderBy(playbookStepsTable.playbookId, playbookStepsTable.stepOrder)
+    : [];
+  const stepsByPlaybook = allSteps.reduce<Record<number, typeof allSteps>>((acc, s) => {
+    if (!acc[s.playbookId]) acc[s.playbookId] = [];
+    acc[s.playbookId].push(s);
+    return acc;
+  }, {});
+
   const playbooksContext = playbooks.map((p) => {
-    const d = p.data as { name: string; summary: string };
-    return `• [PB:${p.id}] ${d.name}: ${d.summary}`;
-  }).join("\n");
+    const d = p.data as { name: string; summary: string; useWhen?: string };
+    const steps = stepsByPlaybook[p.id] ?? [];
+    const stepsText = steps.length > 0
+      ? `\n  Steps:\n${steps.map((s) => `    ${s.stepOrder}. ${s.stepTitle}${s.stepDescription ? `: ${s.stepDescription}` : ""}`).join("\n")}`
+      : "";
+    const useWhenText = d.useWhen ? `\n  Use when: ${d.useWhen}` : "";
+    return `• [PB:${p.id}] ${d.name}: ${d.summary}${useWhenText}${stepsText}`;
+  }).join("\n\n");
 
   const rulesContext = rules.map((r) => {
     const d = r.data as { name: string; ifCondition: string; thenLogic: string };

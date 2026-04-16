@@ -1,0 +1,98 @@
+et me check what's in these docs and then query Sieve to see if this content surfaces correctly.
+
+Read
+Buffer_s_Content_Calendar_Template_How_We_Collaborate_Other_tools_we_use.txt
+Good — I've already seen all 4 docs. Let me map what's in them and design targeted queries.
+
+What the 4 Docs Contain
+Doc	Source	Core Topic	Key Brain Objects Expected
+Buffer Content Calendar	buffer.com	Notion-based content calendar setup, tool stack (Ghost, Notion, Buffer, Ahrefs, SurferSEO)	Content planning playbooks, editorial workflow rules
+Buffer Customer Service Triage	buffer.com	Customer service prioritization, triage methodology, tagging/folders	Customer experience rules, response prioritization
+Social Media Advocacy	buffer.com	Personalization for brand loyalty, behavior data, customer segments	Social media principles, personalization rules
+TikTok Link in Bio	buffer.com	TikTok bio optimization, link strategy, CTAs	Social media tactical playbooks, platform-specific rules
+Now let me fire 4 targeted queries — each designed to hit the content from one specific doc — and see if Sieve returns brain objects that match.
+
+
+Ran a command
+Results are in. Here's the audit:
+
+Sieve Search Audit Results
+Query 1: Content Calendar — PARTIAL HIT ⚠️
+Signal	Result
+Confidence	0.42 (low)
+Buffer doc surfaced?	Sort of — PB:2565 "Content Calendar Setup and Collaboration Workflow" matches the doc. But it's attributed to org: Personal Blog, not org: buffer.com
+Correct content?	Yes — content calendar, social media calendars, publishing frequency all surfaced
+Source attribution?	Wrong — Personal Blog instead of buffer.com on multiple objects
+Issue: The source org classifier seems to have tagged Buffer docs as "Personal Blog" instead of "Buffer" or "buffer.com". This means the brain has the content but citations won't trace back to Buffer as the authority. Compare with Query 2 where PB:2570 correctly shows org: Buffer.
+
+Query 2: Customer Service Triage — DIRECT HIT ✅
+Signal	Result
+Confidence	0.68 (good)
+Buffer doc surfaced?	Yes — PB:2570 "Customer Service Triage: Prioritize and Organize Incoming" directly matches the triage doc, attributed to org: Buffer
+Correct content?	Yes — triage, prioritization, quick personalized care, social customer service
+Source attribution?	Correct for PB:2570 (Buffer), mixed for others (sproutsocial.com, Personal Blog)
+This is the best result. The exact playbook extracted from the Buffer triage doc appeared as the #1 result with correct source attribution.
+
+Query 3: Social Media Advocacy — DIRECT HIT ✅
+Signal	Result
+Confidence	0.72 (strong)
+Buffer doc surfaced?	Yes — PB:2695 "Personalized Experience Implementation for Social Media" + P:10709 "Personalized Experiences Convert Customers Into Advocates" both match the advocacy doc
+Correct content?	Yes — personalization, advocacy, customer data, brand loyalty
+Source attribution?	Wrong — Personal Blog instead of buffer.com on the matching objects
+Issue: Same attribution problem as Query 1 — content is correct, source org is misclassified.
+
+Query 4: TikTok Bio Link — DIRECT HIT ✅
+Signal	Result
+Confidence	0.72 (strong)
+Buffer doc surfaced?	Yes — PB:2734 "Optimize Your TikTok Link in Bio for Maximum Impact" + R:14085 "TikTok Bio Link Must Be Short and Punchy" + R:14084 "TikTok Bio Link Must Communicate Value Upfront" — all directly extracted from the TikTok doc
+Correct content?	Yes — every specific rule from the doc surfaced (short link, value upfront, landing page, 1K follower threshold)
+Source attribution?	Wrong — Personal Blog instead of buffer.com
+The extraction is excellent — it pulled specific tactical rules ("Must Be Short and Punchy", "Must Communicate Value Upfront", "Business Account Required for Clickable Link") directly from the doc text. But attribution is misclassified.
+
+Summary
+Metric	Result
+Content retrieval accuracy	4/4 queries hit the correct doc content ✅
+Brain object extraction quality	Excellent — specific rules, playbooks, principles correctly extracted from each doc
+Semantic matching	Strong — queries in natural language matched against structured brain objects
+Confidence calibration	Reasonable (0.42 to 0.72) — lower for vague queries, higher for specific ones
+Source attribution	🔴 1/4 correct (Buffer), 3/4 misclassified as "Personal Blog"
+Two Improvements Needed
+1. Source Org Misclassification — Personal Blog instead of buffer.com
+3 of the 4 Buffer-sourced brain objects are attributed to org: Personal Blog instead of org: buffer.com or org: Buffer. Only the Customer Service Triage doc (PB:2570) got correct attribution to Buffer.
+
+This is the source classifier in Sieve's ingestion pipeline (sourceClassifier.ts). Looking back at the classifier code I audited earlier, buffer.com IS in the domain map:
+
+"buffer.com": { org: "Buffer", tier: "tier2" },
+So the classifier should catch it. The likely issue is that these docs were ingested through a text paste or file upload (not a URL import), and the classifier only fires when there's a URL to parse. The doc files you showed me have Source: buffer.com | URL: https://buffer.com/resources/... in the header text, but the classifier might not be parsing that header — it may only parse the document's sourceUrl field in the DB.
+
+Fix: Either:
+
+Re-process these docs with the URL correctly set in the documents table (so the classifier fires)
+Or update the ingestion pipeline's metadata header parser to extract sourceOrg from the Source: field in the document header text
+2. Playbook Bodies Not Surfacing in Synthesis
+All 4 queries reported the same issue in missing_data: "The full procedural content of the referenced playbooks is not available." The retrieval correctly finds the playbooks, but the synthesis LLM only receives the summary, not the full step-by-step content.
+
+This has been a recurring finding across multiple tests. The synthesis prompt sends:
+
+• [PB:id] name: summary
+But the playbook's actual steps (the playbook_steps table with step_order, step_title, step_description) are never included. For tactical questions ("how to set up a content calendar"), the summary is too thin — the LLM needs the step-by-step detail.
+
+Fix: In synthesizeAnswerNode, for each playbook in the top 12, query playbook_steps and include them in the prompt:
+
+• [PB:2565] Content Calendar Setup and Collaboration Workflow:
+  Summary: ...
+  Steps:
+    1. Set up Notion database as content calendar foundation
+    2. Configure main properties including Status, Author, Channel...
+    3. Create filtered views starting with calendar as default
+    ...
+This would dramatically improve the quality of tactical answers. The brain has the steps — they're stored in playbook_steps table. They're just not being sent to the synthesis LLM.
+
+Verdict
+Sieve's vector search is working correctly for these docs. All 4 queries retrieved the right brain objects from the right documents. The extraction pipeline pulled specific, actionable rules and playbooks from the Buffer content. Semantic matching via HNSW + RRF found them even though the queries were phrased differently from the original doc text.
+
+Two things to fix:
+
+Source attribution — Buffer docs are misclassified as "Personal Blog" (likely ingestion path issue, not classifier issue)
+Playbook step rendering — synthesis prompt needs to include playbook steps from playbook_steps table, not just summaries
+Neither is a retrieval quality issue — the search works. They're a rendering/attribution issue that affects the final answer quality.
