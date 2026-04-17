@@ -1,0 +1,33 @@
+Is ChatGPT a meaningful driver of demand?
+Short answer: It's a real and growing channel, but it's demand CAPTURE, not demand CREATION. Don't confuse the two.
+
+The sharpest frame
+Refine Labs draws a distinction that matters here: demand creation makes someone want your category; demand capture reaches people who are already in-market. ChatGPT is firmly in the second bucket. It's where someone who has already decided "I need an AI search visibility tool" goes to research options. It does not manufacture that need.
+
+This matters because most founders over-index on ChatGPT hoping it will fill the top of their funnel. It won't. It converts intent that already exists.
+
+The scale data
+37.5M daily searches on ChatGPT (Amsive, HubSpot)
+34% of US adults have used ChatGPT (HubSpot 2025)
+Google Search drives ~40% of web traffic; ChatGPT drives ~0.24% (Ahrefs / traffic share studies)
+So the audience is massive, but the referral traffic is a rounding error today. That gap is the opportunity and the trap — lots of people are using it, very few are clicking through.
+
+Why it still matters for AnswerMonk / any B2B SaaS
+The 1% in-market rule (LinkedIn B2B Institute): At any moment, ~1% of your TAM is actively buying. For that 1%, ChatGPT is a preferred research surface over Google for complex, comparative questions.
+Citation ≠ traffic ≠ revenue, but citation = trust signal. Being cited in ChatGPT answers compounds your brand authority even if the click-through is zero. Prospects see your name in the answer → remember it → search you directly later. This breaks traditional attribution.
+Citation instability is real: 40-60% of cited sources change month-over-month (Search Engine Land). One good month doesn't mean ongoing presence. This is not a set-and-forget channel.
+What the brain can't tell us (honest gaps)
+No reliable conversion rate data from ChatGPT-sourced traffic
+No purchase intent lift studies
+No clean economic value per citation
+So anyone claiming "ChatGPT drives X% of pipeline" is guessing. The honest answer is: we know it's a discovery surface, we don't yet know its economic weight.
+
+My synthesized view
+Treat ChatGPT as a structural shift in research behavior, not a demand machine.
+
+Yes, invest in AEO (schema, listicles, comparison content, branded mentions on tier-1 sites) — this is the AnswerMonk wedge and it's real.
+No, don't expect it to replace brand-building, community, or outbound. Those CREATE demand. ChatGPT captures it.
+The winners over the next 24 months will do both: build brand (so ChatGPT has something to cite) AND optimize for AI citation (so the 1% in-market find you).
+The three authority signals that drive AI citation are unchanged from classical SEO: branded web mentions, branded anchor text, and branded search volume (Ahrefs, Backlinko). Build those and the citation follows.
+
+Sources: Refine Labs (demand capture vs creation frame), LinkedIn B2B Institute (95-5 rule), Amsive + HubSpot (adoption data), Ahrefs (traffic share, authority signals), Search Engine Land (citation volatility), Backlinko (anchor text signals). Sieve confidence: 0.21 — low because there's genuine uncertainty in the underlying data, not because retrieval failed.
