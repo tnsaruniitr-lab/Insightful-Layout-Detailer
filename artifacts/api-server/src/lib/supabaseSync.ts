@@ -10,24 +10,29 @@ function getKey(): string | undefined {
   return process.env.SUPABASE_SERVICE_KEY;
 }
 
+const UPSERT_CHUNK_SIZE = 500;
+
 async function upsert(table: string, records: Record<string, unknown>[]): Promise<void> {
   const key = getKey();
   if (!key || records.length === 0) return;
 
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-    method: "POST",
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
-    },
-    body: JSON.stringify(records),
-  });
+  for (let i = 0; i < records.length; i += UPSERT_CHUNK_SIZE) {
+    const chunk = records.slice(i, i + UPSERT_CHUNK_SIZE);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(chunk),
+    });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Supabase upsert to ${table} failed: ${res.status} ${body}`);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Supabase upsert to ${table} failed (chunk ${i}–${i + chunk.length}): ${res.status} ${body}`);
+    }
   }
 }
 
@@ -69,10 +74,15 @@ async function fetchSupabaseIds(table: BrainTable): Promise<number[]> {
 }
 
 async function purgeOrphansFromSupabase(table: BrainTable, localIds: Set<number>): Promise<number> {
-  const remoteIds = await fetchSupabaseIds(table);
-  const orphans = remoteIds.filter((id) => !localIds.has(id));
-  if (orphans.length > 0) await deleteFromSupabase(table, orphans);
-  return orphans.length;
+  try {
+    const remoteIds = await fetchSupabaseIds(table);
+    const orphans = remoteIds.filter((id) => !localIds.has(id));
+    if (orphans.length > 0) await deleteFromSupabase(table, orphans);
+    return orphans.length;
+  } catch (err) {
+    logger.warn({ err, table }, "Supabase orphan purge skipped (constraint or timeout) — upsert data is still current");
+    return 0;
+  }
 }
 
 export async function fullSyncToSupabase(): Promise<{ synced: Record<string, number>; skipped: string }> {
