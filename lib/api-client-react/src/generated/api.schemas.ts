@@ -664,6 +664,8 @@ export type GetDocumentChunksParams = {
 export type ListPrinciplesParams = {
   status?: ListPrinciplesStatus;
   domain_tag?: ListPrinciplesDomainTag;
+  limit?: number;
+  offset?: number;
 };
 
 export type ListPrinciplesStatus =
@@ -689,6 +691,8 @@ export const ListPrinciplesDomainTag = {
 export type ListRulesParams = {
   status?: ListRulesStatus;
   domain_tag?: ListRulesDomainTag;
+  limit?: number;
+  offset?: number;
 };
 
 export type ListRulesStatus =
@@ -714,6 +718,8 @@ export const ListRulesDomainTag = {
 export type ListPlaybooksParams = {
   status?: ListPlaybooksStatus;
   domain_tag?: ListPlaybooksDomainTag;
+  limit?: number;
+  offset?: number;
 };
 
 export type ListPlaybooksStatus =
@@ -739,6 +745,8 @@ export const ListPlaybooksDomainTag = {
 export type ListAntiPatternsParams = {
   status?: ListAntiPatternsStatus;
   domain_tag?: ListAntiPatternsDomainTag;
+  limit?: number;
+  offset?: number;
 };
 
 export type ListAntiPatternsStatus =

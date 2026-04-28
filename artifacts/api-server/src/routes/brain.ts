@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { fullSyncToSupabase } from "../lib/supabaseSync";
-import { eq, and, desc, inArray, type SQL } from "drizzle-orm";
+import { eq, and, desc, inArray, count, type SQL } from "drizzle-orm";
 import { db, pool } from "@workspace/db";
 import {
   principlesTable,
@@ -41,6 +41,8 @@ router.get("/principles", async (req: Request, res: Response): Promise<void> => 
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
+  const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 200);
+  const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
   const filters: SQL[] = [];
   if (parsed.data.status) {
     filters.push(eq(principlesTable.status, parsed.data.status as BrainStatus));
@@ -48,10 +50,15 @@ router.get("/principles", async (req: Request, res: Response): Promise<void> => 
   if (parsed.data.domain_tag) {
     filters.push(eq(principlesTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
+  const whereClause = filters.length ? and(...filters) : undefined;
+  const [{ total }] = await db.select({ total: count() }).from(principlesTable).where(whereClause);
   const rows = await db
     .select()
     .from(principlesTable)
-    .where(filters.length ? and(...filters) : undefined);
+    .where(whereClause)
+    .limit(limit)
+    .offset(offset);
+  res.setHeader("X-Total-Count", String(total));
   res.json(rows);
 });
 
@@ -61,6 +68,8 @@ router.get("/rules", async (req: Request, res: Response): Promise<void> => {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
+  const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 200);
+  const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
   const filters: SQL[] = [];
   if (parsed.data.status) {
     filters.push(eq(rulesTable.status, parsed.data.status as BrainStatus));
@@ -68,10 +77,15 @@ router.get("/rules", async (req: Request, res: Response): Promise<void> => {
   if (parsed.data.domain_tag) {
     filters.push(eq(rulesTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
+  const whereClause = filters.length ? and(...filters) : undefined;
+  const [{ total }] = await db.select({ total: count() }).from(rulesTable).where(whereClause);
   const rows = await db
     .select()
     .from(rulesTable)
-    .where(filters.length ? and(...filters) : undefined);
+    .where(whereClause)
+    .limit(limit)
+    .offset(offset);
+  res.setHeader("X-Total-Count", String(total));
   res.json(rows);
 });
 
@@ -81,6 +95,8 @@ router.get("/playbooks", async (req: Request, res: Response): Promise<void> => {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
+  const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 200);
+  const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
   const filters: SQL[] = [];
   if (parsed.data.status) {
     filters.push(eq(playbooksTable.status, parsed.data.status as BrainStatus));
@@ -88,10 +104,15 @@ router.get("/playbooks", async (req: Request, res: Response): Promise<void> => {
   if (parsed.data.domain_tag) {
     filters.push(eq(playbooksTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
+  const whereClause = filters.length ? and(...filters) : undefined;
+  const [{ total }] = await db.select({ total: count() }).from(playbooksTable).where(whereClause);
   const rows = await db
     .select()
     .from(playbooksTable)
-    .where(filters.length ? and(...filters) : undefined);
+    .where(whereClause)
+    .limit(limit)
+    .offset(offset);
+  res.setHeader("X-Total-Count", String(total));
   res.json(rows);
 });
 
@@ -123,6 +144,8 @@ router.get("/anti-patterns", async (req: Request, res: Response): Promise<void> 
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
+  const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 200);
+  const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
   const filters: SQL[] = [];
   if (parsed.data.status) {
     filters.push(eq(antiPatternsTable.status, parsed.data.status as BrainStatus));
@@ -130,10 +153,15 @@ router.get("/anti-patterns", async (req: Request, res: Response): Promise<void> 
   if (parsed.data.domain_tag) {
     filters.push(eq(antiPatternsTable.domainTag, parsed.data.domain_tag as DomainTag));
   }
+  const whereClause = filters.length ? and(...filters) : undefined;
+  const [{ total }] = await db.select({ total: count() }).from(antiPatternsTable).where(whereClause);
   const rows = await db
     .select()
     .from(antiPatternsTable)
-    .where(filters.length ? and(...filters) : undefined);
+    .where(whereClause)
+    .limit(limit)
+    .offset(offset);
+  res.setHeader("X-Total-Count", String(total));
   res.json(rows);
 });
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import {
   useListPrinciples,
@@ -16,8 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BrainCircuit, BookOpen, ShieldAlert, CheckCircle, Info, AlertCircle, RefreshCw, FileText } from "lucide-react";
+import { BrainCircuit, BookOpen, ShieldAlert, CheckCircle, Info, AlertCircle, RefreshCw, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { BrainObjectDetail } from "@/components/brain-object-detail";
+
+const PAGE_SIZE = 100;
 
 function parseDocIds(json: string): number[] {
   try {
@@ -66,21 +68,83 @@ function TabErrorState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function PaginationBar({
+  page,
+  pageSize,
+  count,
+  onPrev,
+  onNext,
+  loading,
+}: {
+  page: number;
+  pageSize: number;
+  count: number;
+  onPrev: () => void;
+  onNext: () => void;
+  loading: boolean;
+}) {
+  const hasNext = count === pageSize;
+  const hasPrev = page > 0;
+  if (!hasNext && !hasPrev) return null;
+  const start = page * pageSize + 1;
+  const end = page * pageSize + count;
+  return (
+    <div className="flex items-center justify-between pt-4 border-t mt-2">
+      <span className="text-xs text-muted-foreground">
+        Showing {start}–{end}
+        {!hasNext ? " (end)" : ""}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={onPrev} disabled={!hasPrev || loading}>
+          <ChevronLeft className="h-4 w-4" />
+          Prev
+        </Button>
+        <span className="text-xs text-muted-foreground font-mono">Page {page + 1}</span>
+        <Button variant="outline" size="sm" onClick={onNext} disabled={!hasNext || loading}>
+          Next
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function BrainExplorer() {
   const [domainFilter, setDomainFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [docFilter, setDocFilter] = useState<string>("all");
   const [selected, setSelected] = useState<SelectedObject | null>(null);
+  const [activeTab, setActiveTab] = useState("principles");
 
-  const commonParams = {
+  const [principlesPage, setPrinciplesPage] = useState(0);
+  const [rulesPage, setRulesPage] = useState(0);
+  const [playbooksPage, setPlaybooksPage] = useState(0);
+  const [antipatternsPage, setAntipatternsPage] = useState(0);
+
+  useEffect(() => {
+    setPrinciplesPage(0);
+    setRulesPage(0);
+    setPlaybooksPage(0);
+    setAntipatternsPage(0);
+  }, [domainFilter, statusFilter]);
+
+  const commonFilters = {
     ...(domainFilter !== "all" ? { domain_tag: domainFilter as any } : {}),
     ...(statusFilter !== "all" ? { status: statusFilter as any } : {}),
   };
 
-  const { data: principlesRaw, isLoading: principlesLoading, isError: principlesError, refetch: refetchPrinciples } = useListPrinciples(commonParams as any);
-  const { data: rulesRaw, isLoading: rulesLoading, isError: rulesError, refetch: refetchRules } = useListRules(commonParams as any);
-  const { data: playbooksRaw, isLoading: playbooksLoading, isError: playbooksError, refetch: refetchPlaybooks } = useListPlaybooks(commonParams as any);
-  const { data: antipatternsRaw, isLoading: antiPatternsLoading, isError: antiPatternsError, refetch: refetchAntiPatterns } = useListAntiPatterns(commonParams as any);
+  const { data: principlesRaw, isLoading: principlesLoading, isError: principlesError, refetch: refetchPrinciples } = useListPrinciples({
+    ...commonFilters, limit: PAGE_SIZE, offset: principlesPage * PAGE_SIZE,
+  });
+  const { data: rulesRaw, isLoading: rulesLoading, isError: rulesError, refetch: refetchRules } = useListRules({
+    ...commonFilters, limit: PAGE_SIZE, offset: rulesPage * PAGE_SIZE,
+  });
+  const { data: playbooksRaw, isLoading: playbooksLoading, isError: playbooksError, refetch: refetchPlaybooks } = useListPlaybooks({
+    ...commonFilters, limit: PAGE_SIZE, offset: playbooksPage * PAGE_SIZE,
+  });
+  const { data: antipatternsRaw, isLoading: antiPatternsLoading, isError: antiPatternsError, refetch: refetchAntiPatterns } = useListAntiPatterns({
+    ...commonFilters, limit: PAGE_SIZE, offset: antipatternsPage * PAGE_SIZE,
+  });
   const { data: documents } = useListDocuments({});
 
   const docMap = new Map<number, string>(
@@ -98,7 +162,6 @@ export default function BrainExplorer() {
   const playbooks = filterByDoc(playbooksRaw);
   const antipatterns = filterByDoc(antipatternsRaw);
 
-  // Only list documents that produced at least one brain object
   const docsWithObjects = new Set<number>([
     ...(principlesRaw ?? []).flatMap((p) => parseDocIds(p.sourceRefsJson)),
     ...(rulesRaw ?? []).flatMap((r) => parseDocIds(r.sourceRefsJson)),
@@ -179,7 +242,7 @@ export default function BrainExplorer() {
           </div>
         </div>
 
-        <Tabs defaultValue="principles" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4 max-w-2xl">
             <TabsTrigger value="principles" className="flex gap-2">
               <BrainCircuit className="h-4 w-4" /> Principles
@@ -197,36 +260,46 @@ export default function BrainExplorer() {
 
           <TabsContent value="principles" className="mt-6">
             {principlesLoading ? (
-              <div className="py-12 text-center text-muted-foreground">Loading principles...</div>
+              <div className="py-12 text-center text-muted-foreground">Loading principles…</div>
             ) : principlesError ? (
               <TabErrorState onRetry={() => refetchPrinciples()} />
             ) : principles && principles.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {principles.map((p) => (
-                  <Card
-                    key={p.id}
-                    className="flex flex-col cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
-                    onClick={() => select("principle", p)}
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${p.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={p.status} />
-                          <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+              <>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {principles.map((p) => (
+                    <Card
+                      key={p.id}
+                      className="flex flex-col cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
+                      onClick={() => select("principle", p)}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${p.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={p.status} />
+                            <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+                          </div>
+                          <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
+                            CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
+                          </Badge>
                         </div>
-                        <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
-                          CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
-                        </Badge>
-                      </div>
-                      <CardTitle className="text-base font-semibold leading-tight">{p.title}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 text-sm text-muted-foreground">
-                      <p className="line-clamp-3">{p.statement}</p>
-                      <SourceTags sourceRefsJson={p.sourceRefsJson} docMap={docMap} />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                        <CardTitle className="text-base font-semibold leading-tight">{p.title}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="flex-1 text-sm text-muted-foreground">
+                        <p className="line-clamp-3">{p.statement}</p>
+                        <SourceTags sourceRefsJson={p.sourceRefsJson} docMap={docMap} />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                <PaginationBar
+                  page={principlesPage}
+                  pageSize={PAGE_SIZE}
+                  count={principles.length}
+                  onPrev={() => setPrinciplesPage((p) => Math.max(0, p - 1))}
+                  onNext={() => setPrinciplesPage((p) => p + 1)}
+                  loading={principlesLoading}
+                />
+              </>
             ) : (
               <div className="py-12 text-center border rounded-lg bg-muted/10 text-muted-foreground">No principles found matching filters.</div>
             )}
@@ -234,44 +307,54 @@ export default function BrainExplorer() {
 
           <TabsContent value="rules" className="mt-6">
             {rulesLoading ? (
-              <div className="py-12 text-center text-muted-foreground">Loading rules...</div>
+              <div className="py-12 text-center text-muted-foreground">Loading rules…</div>
             ) : rulesError ? (
               <TabErrorState onRetry={() => refetchRules()} />
             ) : rules && rules.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {rules.map((r) => (
-                  <Card
-                    key={r.id}
-                    className="flex flex-col cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
-                    onClick={() => select("rule", r)}
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${r.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={r.status} />
-                          <Badge variant="outline" className="font-mono text-[10px]">{r.domainTag}</Badge>
-                          <Badge variant="secondary" className="font-mono text-[10px]">{r.ruleType}</Badge>
+              <>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {rules.map((r) => (
+                    <Card
+                      key={r.id}
+                      className="flex flex-col cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
+                      onClick={() => select("rule", r)}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${r.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={r.status} />
+                            <Badge variant="outline" className="font-mono text-[10px]">{r.domainTag}</Badge>
+                            <Badge variant="secondary" className="font-mono text-[10px]">{r.ruleType}</Badge>
+                          </div>
+                          <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(r.confidenceScore)}`}>
+                            CONF: {r.confidenceScore ? Math.round(parseFloat(r.confidenceScore) * 100) + "%" : "N/A"}
+                          </Badge>
                         </div>
-                        <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(r.confidenceScore)}`}>
-                          CONF: {r.confidenceScore ? Math.round(parseFloat(r.confidenceScore) * 100) + "%" : "N/A"}
-                        </Badge>
-                      </div>
-                      <CardTitle className="text-base font-semibold leading-tight">{r.name}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 space-y-3">
-                      <div className="bg-primary/5 p-3 rounded border border-primary/10 text-sm">
-                        <span className="font-bold text-primary text-xs uppercase block mb-1">IF</span>
-                        {r.ifCondition}
-                      </div>
-                      <div className="bg-muted p-3 rounded border text-sm">
-                        <span className="font-bold text-foreground text-xs uppercase block mb-1">THEN</span>
-                        {r.thenLogic}
-                      </div>
-                      <SourceTags sourceRefsJson={r.sourceRefsJson} docMap={docMap} />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                        <CardTitle className="text-base font-semibold leading-tight">{r.name}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="flex-1 space-y-3">
+                        <div className="bg-primary/5 p-3 rounded border border-primary/10 text-sm">
+                          <span className="font-bold text-primary text-xs uppercase block mb-1">IF</span>
+                          {r.ifCondition}
+                        </div>
+                        <div className="bg-muted p-3 rounded border text-sm">
+                          <span className="font-bold text-foreground text-xs uppercase block mb-1">THEN</span>
+                          {r.thenLogic}
+                        </div>
+                        <SourceTags sourceRefsJson={r.sourceRefsJson} docMap={docMap} />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                <PaginationBar
+                  page={rulesPage}
+                  pageSize={PAGE_SIZE}
+                  count={rules.length}
+                  onPrev={() => setRulesPage((p) => Math.max(0, p - 1))}
+                  onNext={() => setRulesPage((p) => p + 1)}
+                  loading={rulesLoading}
+                />
+              </>
             ) : (
               <div className="py-12 text-center border rounded-lg bg-muted/10 text-muted-foreground">No rules found matching filters.</div>
             )}
@@ -279,50 +362,60 @@ export default function BrainExplorer() {
 
           <TabsContent value="playbooks" className="mt-6">
             {playbooksLoading ? (
-              <div className="py-12 text-center text-muted-foreground">Loading playbooks...</div>
+              <div className="py-12 text-center text-muted-foreground">Loading playbooks…</div>
             ) : playbooksError ? (
               <TabErrorState onRetry={() => refetchPlaybooks()} />
             ) : playbooks && playbooks.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                {playbooks.map((p) => (
-                  <Card
-                    key={p.id}
-                    className="cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
-                    onClick={() => select("playbook", p)}
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${p.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={p.status} />
-                          <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+              <>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {playbooks.map((p) => (
+                    <Card
+                      key={p.id}
+                      className="cursor-pointer hover:shadow-md hover:border-primary/40 transition-all"
+                      onClick={() => select("playbook", p)}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${p.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={p.status} />
+                            <Badge variant="outline" className="font-mono text-[10px]">{p.domainTag}</Badge>
+                          </div>
+                          <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
+                            CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
+                          </Badge>
                         </div>
-                        <Badge variant="secondary" className={`text-[10px] border ${getConfidenceColor(p.confidenceScore)}`}>
-                          CONF: {p.confidenceScore ? Math.round(parseFloat(p.confidenceScore) * 100) + "%" : "N/A"}
-                        </Badge>
-                      </div>
-                      <CardTitle className="text-lg font-serif font-bold">{p.name}</CardTitle>
-                      <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{p.summary}</p>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex gap-4 text-xs">
-                        {p.useWhen && (
-                          <div className="flex-1">
-                            <span className="font-semibold text-emerald-600 block mb-1">USE WHEN:</span>
-                            <span className="text-muted-foreground line-clamp-2">{p.useWhen}</span>
-                          </div>
-                        )}
-                        {p.avoidWhen && (
-                          <div className="flex-1">
-                            <span className="font-semibold text-destructive block mb-1">AVOID WHEN:</span>
-                            <span className="text-muted-foreground line-clamp-2">{p.avoidWhen}</span>
-                          </div>
-                        )}
-                      </div>
-                      <SourceTags sourceRefsJson={p.sourceRefsJson} docMap={docMap} />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                        <CardTitle className="text-lg font-serif font-bold">{p.name}</CardTitle>
+                        <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{p.summary}</p>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex gap-4 text-xs">
+                          {p.useWhen && (
+                            <div className="flex-1">
+                              <span className="font-semibold text-emerald-600 block mb-1">USE WHEN:</span>
+                              <span className="text-muted-foreground line-clamp-2">{p.useWhen}</span>
+                            </div>
+                          )}
+                          {p.avoidWhen && (
+                            <div className="flex-1">
+                              <span className="font-semibold text-destructive block mb-1">AVOID WHEN:</span>
+                              <span className="text-muted-foreground line-clamp-2">{p.avoidWhen}</span>
+                            </div>
+                          )}
+                        </div>
+                        <SourceTags sourceRefsJson={p.sourceRefsJson} docMap={docMap} />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                <PaginationBar
+                  page={playbooksPage}
+                  pageSize={PAGE_SIZE}
+                  count={playbooks.length}
+                  onPrev={() => setPlaybooksPage((p) => Math.max(0, p - 1))}
+                  onNext={() => setPlaybooksPage((p) => p + 1)}
+                  loading={playbooksLoading}
+                />
+              </>
             ) : (
               <div className="py-12 text-center border rounded-lg bg-muted/10 text-muted-foreground">No playbooks found matching filters.</div>
             )}
@@ -330,42 +423,52 @@ export default function BrainExplorer() {
 
           <TabsContent value="antipatterns" className="mt-6">
             {antiPatternsLoading ? (
-              <div className="py-12 text-center text-muted-foreground">Loading anti-patterns...</div>
+              <div className="py-12 text-center text-muted-foreground">Loading anti-patterns…</div>
             ) : antiPatternsError ? (
               <TabErrorState onRetry={() => refetchAntiPatterns()} />
             ) : antipatterns && antipatterns.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {antipatterns.map((ap) => (
-                  <Card
-                    key={ap.id}
-                    className="flex flex-col border-destructive/30 cursor-pointer hover:shadow-md hover:border-destructive/60 transition-all"
-                    onClick={() => select("anti_pattern", ap)}
-                  >
-                    <CardHeader className="pb-3 bg-destructive/5">
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${ap.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={ap.status} />
-                          <Badge variant="outline" className="font-mono text-[10px] border-destructive/20 text-destructive">{ap.domainTag}</Badge>
+              <>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {antipatterns.map((ap) => (
+                    <Card
+                      key={ap.id}
+                      className="flex flex-col border-destructive/30 cursor-pointer hover:shadow-md hover:border-destructive/60 transition-all"
+                      onClick={() => select("anti_pattern", ap)}
+                    >
+                      <CardHeader className="pb-3 bg-destructive/5">
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${ap.status === "canonical" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} title={ap.status} />
+                            <Badge variant="outline" className="font-mono text-[10px] border-destructive/20 text-destructive">{ap.domainTag}</Badge>
+                          </div>
+                          <Badge variant="secondary" className="font-mono text-[10px] bg-destructive text-destructive-foreground">
+                            {ap.riskLevel.toUpperCase()} RISK
+                          </Badge>
                         </div>
-                        <Badge variant="secondary" className="font-mono text-[10px] bg-destructive text-destructive-foreground">
-                          {ap.riskLevel.toUpperCase()} RISK
-                        </Badge>
-                      </div>
-                      <CardTitle className="text-base font-semibold leading-tight text-destructive">{ap.title}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 text-sm text-muted-foreground pt-4 space-y-3">
-                      <p className="line-clamp-3">{ap.description}</p>
-                      <div className="bg-muted p-2 rounded text-xs">
-                        <span className="font-semibold block mb-1 text-foreground flex items-center gap-1">
-                          <Info className="h-3 w-3" /> Signals
-                        </span>
-                        <span className="line-clamp-2">{ap.signalsJson}</span>
-                      </div>
-                      <SourceTags sourceRefsJson={ap.sourceRefsJson} docMap={docMap} />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                        <CardTitle className="text-base font-semibold leading-tight text-destructive">{ap.title}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="flex-1 text-sm text-muted-foreground pt-4 space-y-3">
+                        <p className="line-clamp-3">{ap.description}</p>
+                        <div className="bg-muted p-2 rounded text-xs">
+                          <span className="font-semibold block mb-1 text-foreground flex items-center gap-1">
+                            <Info className="h-3 w-3" /> Signals
+                          </span>
+                          <span className="line-clamp-2">{ap.signalsJson}</span>
+                        </div>
+                        <SourceTags sourceRefsJson={ap.sourceRefsJson} docMap={docMap} />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                <PaginationBar
+                  page={antipatternsPage}
+                  pageSize={PAGE_SIZE}
+                  count={antipatterns.length}
+                  onPrev={() => setAntipatternsPage((p) => Math.max(0, p - 1))}
+                  onNext={() => setAntipatternsPage((p) => p + 1)}
+                  loading={antiPatternsLoading}
+                />
+              </>
             ) : (
               <div className="py-12 text-center border rounded-lg bg-muted/10 text-muted-foreground">No anti-patterns found matching filters.</div>
             )}
