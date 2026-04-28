@@ -43,7 +43,7 @@ export function Layout({ children }: LayoutProps) {
           <div className="flex flex-col leading-tight text-sidebar-primary">
             <div className="flex items-center gap-2 font-bold text-lg tracking-tight font-mono">
               <BrainCircuit className="h-5 w-5 shrink-0" />
-              <span>Tryps</span>
+              <span>Marketo</span>
             </div>
             <span className="text-[10px] font-medium text-sidebar-primary/60 tracking-widest uppercase pl-7">AEO / GEO Automation</span>
           </div>
