@@ -36,3 +36,15 @@ id = "w8Bg4LFYNuZ9oNWP4OXZn"
 uri = "file://exports/anti-patterns-snapshot.json"
 type = "unspecified"
 title = "anti-patterns-snapshot.json"
+
+[[outputs]]
+id = "otpSVB2HisS97VovB0Tn6"
+uri = "file://exports/principles-snapshot.json"
+type = "unspecified"
+title = "principles-snapshot.json"
+
+[[outputs]]
+id = "Ud7TNjxlrnzdDkv4Qktmz"
+uri = "file://exports/playbooks-snapshot.json"
+type = "unspecified"
+title = "playbooks-snapshot.json"
