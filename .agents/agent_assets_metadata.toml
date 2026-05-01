@@ -24,3 +24,15 @@ id = "LZ9J5HmsGonsskbVz7SN3"
 uri = "file://attached_assets/all_chunk_hashes.csv"
 type = "table"
 title = "all_chunk_hashes.csv — 1,773 chunk MD5s"
+
+[[outputs]]
+id = "DwT7FRnWY-8izJpmuOk8i"
+uri = "file://exports/rules-snapshot.json"
+type = "unspecified"
+title = "rules-snapshot.json"
+
+[[outputs]]
+id = "w8Bg4LFYNuZ9oNWP4OXZn"
+uri = "file://exports/anti-patterns-snapshot.json"
+type = "unspecified"
+title = "anti-patterns-snapshot.json"

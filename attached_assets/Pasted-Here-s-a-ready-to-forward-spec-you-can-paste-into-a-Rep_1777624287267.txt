@@ -1,0 +1,154 @@
+Here's a ready-to-forward spec you can paste into a Replit prompt or send to whoever owns the Sieve project.
+
+Spec to send Replit
+Goal
+Export the Sieve brain (rules + anti-patterns + their source documents) as two static JSON files that the auditor consumes locally. Read-only operation, no DB changes.
+
+Project + tables
+Supabase project: aldraxqsqeywluohskhs
+Source tables: rules, anti_patterns, documents
+Read-only — these are SELECT queries
+Filter
+Only export entries tagged for the auditor's domains:
+
+rules.domain_tag IN ('seo', 'aeo', 'geo', 'entity')
+anti_patterns.domain_tag IN ('seo', 'aeo', 'entity')
+Query 1 — rules export
+SELECT json_agg(
+  jsonb_build_object(
+    'id', r.id,
+    'name', r.name,
+    'source_org', r.source_org,
+    'confidence_score', r.confidence_score::text,
+    'if_condition', r.if_condition,
+    'then_action', r.then_action,
+    'domain_tag', r.domain_tag,
+    'source_title', d.title,
+    'source_url', d.source_url
+  )
+) AS rules_json
+FROM rules r
+LEFT JOIN LATERAL (
+  SELECT title, source_url FROM documents
+  WHERE id = (r.source_refs_json::jsonb->>0)::int
+  LIMIT 1
+) d ON true
+WHERE r.domain_tag IN ('seo','aeo','geo','entity');
+Query 2 — anti-patterns export
+SELECT json_agg(
+  jsonb_build_object(
+    'id', ap.id,
+    'title', ap.title,
+    'description', ap.description,
+    'risk_level', ap.risk_level::text,
+    'source_org', ap.source_org,
+    'domain_tag', ap.domain_tag,
+    'source_title', d.title,
+    'source_url', d.source_url
+  )
+) AS anti_patterns_json
+FROM anti_patterns ap
+LEFT JOIN LATERAL (
+  SELECT title, source_url FROM documents
+  WHERE id = (ap.source_refs_json::jsonb->>0)::int
+  LIMIT 1
+) d ON true
+WHERE ap.domain_tag IN ('seo','aeo','entity');
+Output: 2 JSON files
+File 1 — rules-snapshot.json (one big JSON array, ~1.2–1.6 MB):
+
+[
+  {
+    "id": 1668,
+    "name": "Organization must include name and URL",
+    "source_org": "Schema.org",
+    "confidence_score": "0.98",
+    "if_condition": "Organization schema is present on the page",
+    "then_action": "Both 'name' and 'url' fields MUST be populated",
+    "domain_tag": "schema",
+    "source_title": "Organization",
+    "source_url": "https://schema.org/Organization"
+  },
+  {
+    "id": 1419,
+    "name": "Critical content must be in crawlable HTML",
+    "source_org": "Google",
+    "confidence_score": "0.98",
+    "if_condition": "...",
+    "then_action": "...",
+    "domain_tag": "aeo",
+    "source_title": "JavaScript SEO basics",
+    "source_url": "https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics"
+  },
+  ...
+]
+File 2 — anti-patterns-snapshot.json (same shape, different fields, ~600–800 KB):
+
+[
+  {
+    "id": 4763,
+    "title": "Omitting Schema Markup",
+    "description": "Pages without JSON-LD structured data cannot be indexed by AI engines as discrete entities...",
+    "risk_level": "high",
+    "source_org": "Backlinko",
+    "domain_tag": "aeo",
+    "source_title": "Schema Markup Guide",
+    "source_url": "https://backlinko.com/schema-markup-guide"
+  },
+  ...
+]
+Required field types
+Field	Type	Notes
+id	integer	Primary key, used by the auditor for lookup
+name / title	string	Used in citation prose
+source_org	string	Used for tier classification (Google = Tier 1, etc.)
+confidence_score	string (decimal as text)	"0.98" — kept as string to preserve precision
+if_condition / description	string	Used in audit's WHY blocks
+then_action	string (rules only)	Used in fix recommendations
+domain_tag	enum string	"seo" / "aeo" / "geo" / "entity" / "schema" / etc.
+risk_level	enum string (anti-patterns only)	"low" / "medium" / "high"
+source_url	string or null	Link to authoritative source
+source_title	string or null	Document title
+Expected counts (sanity check)
+rules-snapshot.json: ~5,200 entries
+anti-patterns-snapshot.json: ~2,950–3,000 entries
+Both numbers grow over time as the brain expands. These are mid-April 2026 baselines.
+
+Where the files go
+Once exported, drop into the auditor's GitHub repo:
+
+github.com/tnsaruniitr-lab/aeo-seo-auditor/auditor-ruleset-export/
+Refresh cadence
+For now: one-time export, manual.
+Later (Stage 2): set up a cron job in Replit that re-runs the export weekly and pushes to GitHub via Action.
+
+What the auditor will do with this
+Load both JSON files into memory at startup (~10 ms total)
+Index by id for O(1) lookup
+When a static check fails, look up the mapped rule IDs from brain-mappings.md, fetch the rule rows from this snapshot
+Cite top 1–3 by tier + confidence in the audit's WHY block
+What NOT to include in the export
+Internal-only fields (created_at, updated_at, created_by — not needed for citations)
+The source_refs_json array directly (we resolve it via the LEFT JOIN to get title + URL of the first source)
+Embeddings or vectors (we're not running vector search at runtime)
+Anti-pattern rules that are domain-tagged outside our 4 categories
+Two things to confirm with Replit
+Do they have direct DB write access to commit JSON to aeo-seo-auditor repo? If yes, automated. If no, they email you the JSONs and you commit them. Either works.
+The source_refs_json shape. The query assumes it's a JSON array of integer IDs. If it's something else (array of objects, comma-separated string), the LEFT JOIN needs adjusting. Best to pull a sample first and confirm shape before running the full export.
+A quick verify query for sanity:
+
+SELECT id, name, source_refs_json FROM rules WHERE id IN (1668, 1419, 1474) LIMIT 3;
+If source_refs_json looks like [42, 87, 103] or "[42, 87, 103]", the export query works as-is. If it looks different, send me the actual format and I'll adjust.
+
+What you get back from Replit
+Two files + sanity numbers:
+
+rules-snapshot.json
+anti-patterns-snapshot.json
+Confirmed counts (~5,200 rules / ~2,950 APs)
+Confirmation of the source_refs_json shape
+Drop both into your local auditor-ruleset-export/ folder, commit, push. Step 1 is done.
+
+After that, the auditor can run completely standalone on JSON snapshots — no Supabase access needed at audit time.
+
+Want me to draft a one-liner Replit prompt that wraps this whole spec? Or send the spec as-is?
