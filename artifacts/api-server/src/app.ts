@@ -8,30 +8,32 @@ import { generalLimiter } from "./lib/rateLimiter";
 
 const isProd = process.env["NODE_ENV"] === "production";
 
-// Allowed CORS origins: Sieve frontend + any extra origins from env
-function buildCorsOrigins(): string[] | boolean {
-  if (!isProd) return true; // allow all in dev
-  const extra = (process.env["ALLOWED_ORIGINS"] ?? "")
+// In production, ALLOWED_ORIGINS must be a comma-separated list of exact
+// origins (e.g. "https://sieve.replit.app"). No wildcard matching is used
+// so that credentials: true CORS is locked to known frontends only.
+function buildCorsOriginList(): string[] {
+  return (process.env["ALLOWED_ORIGINS"] ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const defaults = [
-    // replit.app production domains — wildcard matched below
-  ];
-  return [...defaults, ...extra];
+}
+
+if (isProd && buildCorsOriginList().length === 0) {
+  // Warn loudly at startup — requests from browsers will be blocked until
+  // ALLOWED_ORIGINS is set to the Sieve production URL.
+  logger.warn(
+    "ALLOWED_ORIGINS is not set. All cross-origin browser requests will be " +
+      "rejected. Set ALLOWED_ORIGINS=<sieve-production-url> and redeploy.",
+  );
 }
 
 const corsOptions: cors.CorsOptions = {
   origin: isProd
     ? (origin, callback) => {
-        const allowed = buildCorsOrigins();
-        if (allowed === true || !origin) return callback(null, true);
-        const list = allowed as string[];
-        const ok =
-          list.some((o) => o === origin) ||
-          // allow any *.replit.app subdomain
-          /^https:\/\/[a-z0-9-]+\.replit\.app$/.test(origin);
-        if (ok) return callback(null, true);
+        // Server-to-server calls (no Origin header) are always allowed
+        if (!origin) return callback(null, true);
+        const allowed = buildCorsOriginList();
+        if (allowed.includes(origin)) return callback(null, true);
         return callback(new Error(`CORS: origin '${origin}' not allowed`));
       }
     : (_origin, callback) => callback(null, true),
