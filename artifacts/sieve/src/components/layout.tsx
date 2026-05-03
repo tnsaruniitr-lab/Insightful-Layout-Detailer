@@ -12,9 +12,11 @@ import {
   Wifi,
   WifiOff,
   AlertTriangle,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHealthCheck } from "@workspace/api-client-react";
+import { useAuth } from "@/contexts/auth-context";
 
 interface LayoutProps {
   children: ReactNode;
@@ -23,6 +25,7 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
   const { data: health, isError } = useHealthCheck({ query: { refetchInterval: 30000, queryKey: ['healthz'] } });
+  const { logout } = useAuth();
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: Activity },
@@ -80,15 +83,22 @@ export function Layout({ children }: LayoutProps) {
           </nav>
         </div>
         
-        <div className="p-4 border-t border-sidebar-border">
+        <div className="p-4 border-t border-sidebar-border space-y-2">
           <div className="flex items-center gap-3 px-3 py-2 rounded-md bg-sidebar-accent/50">
             <div className="h-8 w-8 rounded bg-sidebar-primary flex items-center justify-center text-sidebar-primary-foreground font-bold text-xs">
               AN
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col flex-1 min-w-0">
               <span className="text-xs font-medium text-sidebar-foreground">Analyst Profile</span>
               <span className="text-[10px] text-sidebar-foreground/50">Senior Partner</span>
             </div>
+            <button
+              onClick={logout}
+              title="Sign out"
+              className="text-sidebar-foreground/40 hover:text-sidebar-foreground transition-colors"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </aside>

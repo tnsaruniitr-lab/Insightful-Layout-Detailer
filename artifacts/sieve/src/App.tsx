@@ -4,8 +4,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrandProvider } from "@/hooks/use-brand-context";
 import { ModelProvider } from "@/contexts/model-context";
+import { AuthProvider } from "@/contexts/auth-context";
+import { AuthGuard } from "@/components/auth-guard";
 import { ErrorBoundary } from "@/components/error-boundary";
 
+import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import KnowledgeHub from "@/pages/knowledge";
 import BrainExplorer from "@/pages/brain";
@@ -24,18 +27,25 @@ const queryClient = new QueryClient();
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/knowledge" component={KnowledgeHub} />
-      <Route path="/brain" component={BrainExplorer} />
-      <Route path="/playbooks" component={PlaybooksPage} />
-      <Route path="/brand" component={BrandProfile} />
-      <Route path="/ask" component={AskBrain} />
-      <Route path="/map" component={BrandMapping} />
-      <Route path="/strategy" component={StrategyOutput} />
-      <Route path="/runs/:id" component={RunDetail} />
-      <Route path="/runs" component={RunsHistory} />
-      <Route path="/conflicts" component={ConflictsPage} />
-      <Route component={NotFound} />
+      <Route path="/login" component={Login} />
+      <Route>
+        <AuthGuard>
+          <Switch>
+            <Route path="/" component={Dashboard} />
+            <Route path="/knowledge" component={KnowledgeHub} />
+            <Route path="/brain" component={BrainExplorer} />
+            <Route path="/playbooks" component={PlaybooksPage} />
+            <Route path="/brand" component={BrandProfile} />
+            <Route path="/ask" component={AskBrain} />
+            <Route path="/map" component={BrandMapping} />
+            <Route path="/strategy" component={StrategyOutput} />
+            <Route path="/runs/:id" component={RunDetail} />
+            <Route path="/runs" component={RunsHistory} />
+            <Route path="/conflicts" component={ConflictsPage} />
+            <Route component={NotFound} />
+          </Switch>
+        </AuthGuard>
+      </Route>
     </Switch>
   );
 }
@@ -43,18 +53,20 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrandProvider>
-        <ModelProvider>
-        <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <ErrorBoundary>
-              <Router />
-            </ErrorBoundary>
-          </WouterRouter>
-          <Toaster />
-        </TooltipProvider>
-        </ModelProvider>
-      </BrandProvider>
+      <AuthProvider>
+        <BrandProvider>
+          <ModelProvider>
+            <TooltipProvider>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <ErrorBoundary>
+                  <Router />
+                </ErrorBoundary>
+              </WouterRouter>
+              <Toaster />
+            </TooltipProvider>
+          </ModelProvider>
+        </BrandProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
