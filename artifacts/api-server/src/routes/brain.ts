@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { brainLimiter, ingestLimiter } from "../lib/rateLimiter";
 import { fullSyncToSupabase } from "../lib/supabaseSync";
 import { eq, and, desc, inArray, count, type SQL } from "drizzle-orm";
 import { db, pool } from "@workspace/db";
@@ -182,7 +183,7 @@ router.get("/examples", async (req: Request, res: Response): Promise<void> => {
   res.json(rows);
 });
 
-router.post("/brain/ask", async (req: Request, res: Response): Promise<void> => {
+router.post("/brain/ask", brainLimiter, async (req: Request, res: Response): Promise<void> => {
   const parsed = AskBrainBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
@@ -227,7 +228,7 @@ router.post("/brain/ask", async (req: Request, res: Response): Promise<void> => 
   }
 });
 
-router.post("/brain/map-brand", async (req: Request, res: Response): Promise<void> => {
+router.post("/brain/map-brand", brainLimiter, async (req: Request, res: Response): Promise<void> => {
   const parsed = MapBrandBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
@@ -670,7 +671,7 @@ function processBatchWithConcurrency(ids: number[]): void {
   void Promise.all(Array.from({ length: slots }, worker));
 }
 
-router.post("/brain/ingest-batch", async (req: Request, res: Response): Promise<void> => {
+router.post("/brain/ingest-batch", ingestLimiter, async (req: Request, res: Response): Promise<void> => {
   const parsed = IngestBatchBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
